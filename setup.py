@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="bonicbot_bridge",
-    version="0.1.0",
+    version="0.2.0",
     author="Autobonics Pvt Ltd",
     author_email="support@bonic.ai",
     description="Python SDK for educational robotics programming with BonicBot A2",
@@ -47,6 +47,10 @@ setup(
         "jupyter": [
             "jupyter>=1.0",
             "matplotlib>=3.5",
+            "numpy>=1.20",
+        ],
+        "camera": [
+            "opencv-python>=4.5",
             "numpy>=1.20",
         ],
     },

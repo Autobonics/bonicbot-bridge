@@ -13,6 +13,7 @@ class SystemController:
         self.state_sub = Topic(self.ros, '/robot/state', 'std_msgs/String')
         self.mapping_status_sub = Topic(self.ros, '/robot/mapping_active', 'std_msgs/Bool')
         self.nav_status_sub = Topic(self.ros, '/robot/navigation_active', 'std_msgs/Bool')
+        self.camera_status_sub = Topic(self.ros, '/robot/camera_active', 'std_msgs/Bool')
         
         # System control services
         self.start_mapping_srv = Service(self.ros, '/robot/start_mapping', 'std_srvs/Trigger')
@@ -20,16 +21,20 @@ class SystemController:
         self.save_map_srv = Service(self.ros, '/robot/save_map', 'std_srvs/Trigger')
         self.start_nav_srv = Service(self.ros, '/robot/start_navigation', 'std_srvs/Trigger')
         self.stop_nav_srv = Service(self.ros, '/robot/stop_navigation', 'std_srvs/Trigger')
+        self.start_camera_srv = Service(self.ros, '/robot/start_camera', 'std_srvs/Trigger')
+        self.stop_camera_srv = Service(self.ros, '/robot/stop_camera', 'std_srvs/Trigger')
         
         # System state
         self.robot_state = 'idle'
         self.mapping_active = False
         self.navigation_active = False
+        self.camera_active = False
         
         # Subscribe to status updates
         self.state_sub.subscribe(self._state_callback)
         self.mapping_status_sub.subscribe(self._mapping_callback)
         self.nav_status_sub.subscribe(self._nav_callback)
+        self.camera_status_sub.subscribe(self._camera_callback)
     
     def _state_callback(self, msg):
         """Update robot state"""
@@ -42,6 +47,10 @@ class SystemController:
     def _nav_callback(self, msg):
         """Update navigation status"""
         self.navigation_active = msg['data']
+    
+    def _camera_callback(self, msg):
+        """Update camera status"""
+        self.camera_active = msg['data']
     
     def start_mapping(self):
         """
@@ -157,6 +166,7 @@ class SystemController:
             'state': self.robot_state,
             'mapping_active': self.mapping_active,
             'navigation_active': self.navigation_active,
+            'camera_active': self.camera_active,
             'ready_for_goals': self.navigation_active
         }
     
@@ -171,6 +181,50 @@ class SystemController:
     def get_robot_state(self):
         """Get current robot state string"""
         return self.robot_state
+    
+    def start_camera(self):
+        """
+        Start camera system
+        
+        Returns:
+            bool: True if camera started successfully
+        """
+        try:
+            request = ServiceRequest()
+            response = self.start_camera_srv.call(request)
+            
+            if not response['success']:
+                raise SystemError(f"Failed to start camera: {response['message']}")
+            
+            print("📷 Camera started")
+            return True
+            
+        except Exception as e:
+            raise SystemError(f"Camera start failed: {str(e)}")
+    
+    def stop_camera(self):
+        """
+        Stop camera system
+        
+        Returns:
+            bool: True if camera stopped successfully
+        """
+        try:
+            request = ServiceRequest()
+            response = self.stop_camera_srv.call(request)
+            
+            if not response['success']:
+                raise SystemError(f"Failed to stop camera: {response['message']}")
+            
+            print("🛑 Camera stopped")
+            return True
+            
+        except Exception as e:
+            raise SystemError(f"Camera stop failed: {str(e)}")
+    
+    def is_camera_active(self):
+        """Check if camera system is active"""
+        return self.camera_active
     
     def setup_for_mapping(self):
         """
