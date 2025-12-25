@@ -36,6 +36,16 @@ bot.wait_for_goal()
 position = bot.get_position()
 print(f"Robot is at: {position}")
 
+# Camera
+bot.start_camera()
+image = bot.get_image()
+bot.save_image('snapshot.jpg')
+
+# Servo control
+bot.move_left_arm(90, 30)  # shoulder, elbow angles
+bot.look_left()
+bot.open_grippers()
+
 # System control
 bot.start_mapping()
 # Drive around to create map...
@@ -61,6 +71,8 @@ with BonicBot() as bot:
 - 🗺️ **SLAM Mapping**: Create and save maps of the environment
 - 🧭 **Autonomous Navigation**: Navigate to specific coordinates
 - 📊 **Sensor Access**: Read position, battery, and other sensor data
+- 📷 **Camera Streaming**: Real-time image capture and processing
+- 🤖 **Servo Control**: Control robot arms, grippers, and neck
 - 🔄 **Real-time Feedback**: Live updates on robot status and goals
 - 🛡️ **Safety Features**: Built-in error handling and connection management
 - 📚 **Educational Focus**: Designed specifically for STEM learning
@@ -283,6 +295,176 @@ if bot.is_connected():
     print("Robot connection OK")
 ```
 
+### Camera Methods
+
+#### `start_camera(callback=None)`
+
+Start camera streaming with optional callback for real-time processing.
+
+**Parameters:**
+- `callback` (function): Optional function called for each frame: `callback(image)`
+
+```python
+# Simple streaming
+bot.start_camera()
+
+# With callback for processing
+def process_frame(image):
+    print(f"Frame: {image.shape}")
+    
+bot.start_camera(callback=process_frame)
+```
+
+#### `stop_camera()`
+
+Stop camera streaming.
+
+```python
+bot.stop_camera()
+```
+
+#### `get_image()`
+
+Get the latest camera image as numpy array (BGR format).
+
+**Returns:** numpy.ndarray or None
+
+```python
+image = bot.get_image()
+if image is not None:
+    print(f"Image shape: {image.shape}")
+```
+
+#### `save_image(filepath)`
+
+Save current camera image to file.
+
+```python
+bot.save_image("robot_view.jpg")
+```
+
+### Servo Control Methods
+
+#### `set_servos(angles)`
+
+Set multiple servo angles at once.
+
+**Parameters:**
+- `angles` (dict): Dictionary mapping joint names to angles in degrees
+
+```python
+bot.set_servos({
+    'left_shoulder_pitch_joint': 45.0,
+    'neck_yaw_joint': -30.0
+})
+```
+
+#### `move_left_arm(shoulder, elbow)` / `move_right_arm(shoulder, elbow)`
+
+Move robot arms to specified angles.
+
+**Parameters:**
+- `shoulder` (float): Shoulder pitch angle (-45° to 180°)
+- `elbow` (float): Elbow angle (0° to 50°)
+
+```python
+bot.move_left_arm(90, 30)   # Left arm up
+bot.move_right_arm(45, 20)  # Right arm halfway
+```
+
+#### `set_grippers(left, right)` / `open_grippers()` / `close_grippers()`
+
+Control gripper fingers.
+
+```python
+bot.open_grippers()         # Open both grippers
+bot.close_grippers()        # Close both grippers
+bot.set_grippers(30, 30)    # Partial open
+```
+
+#### `set_neck(yaw)` / `look_left()` / `look_right()` / `look_center()`
+
+Control neck rotation.
+
+**Parameters:**
+- `yaw` (float): Neck yaw angle (-90° to 90°)
+
+```python
+bot.set_neck(-45)   # Look right 45°
+bot.look_left()     # Turn fully left
+bot.look_center()   # Center position
+```
+
+#### `reset_servos()`
+
+Reset all servos to neutral position (0°).
+
+```python
+bot.reset_servos()
+```
+
+### Example 5: Camera Vision
+
+```python
+from bonicbot_bridge import BonicBot
+import cv2
+
+with BonicBot() as bot:
+    # Start camera with callback
+    def detect_objects(image):
+        # Simple color detection example
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        # Detect red objects
+        lower_red = (0, 100, 100)
+        upper_red = (10, 255, 255)
+        mask = cv2.inRange(hsv, lower_red, upper_red)
+        
+        if cv2.countNonZero(mask) > 1000:
+            print("Red object detected!")
+    
+    bot.start_camera(callback=detect_objects)
+    
+    # Let it run for 10 seconds
+    import time
+    time.sleep(10)
+    
+    # Save a snapshot
+    bot.save_image("detection_result.jpg")
+    bot.stop_camera()
+```
+
+### Example 6: Servo Gestures
+
+```python
+from bonicbot_bridge import BonicBot
+import time
+
+with BonicBot() as bot:
+    print("Robot greeting sequence...")
+    
+    # Wave hello
+    bot.look_center()
+    bot.servo.wave_right_arm(duration=3)
+    time.sleep(0.5)
+    
+    # Look around
+    bot.look_left()
+    time.sleep(1)
+    bot.look_right()
+    time.sleep(1)
+    bot.look_center()
+    
+    # Gripper demo
+    bot.move_left_arm(90, 30)
+    bot.move_right_arm(90, 30)
+    bot.open_grippers()
+    time.sleep(1)
+    bot.close_grippers()
+    
+    # Reset
+    bot.reset_servos()
+    print("Greeting complete!")
+```
 ## 🎓 Educational Examples
 
 ### Example 1: Basic Movement
@@ -497,6 +679,11 @@ The library communicates with these ROS2 topics and services:
 - `/goal_pose` (geometry_msgs/PoseStamped) - Navigation goals
 - `/robot/nav_status` (std_msgs/String) - Navigation status updates
 - `/robot/distance_to_goal` (std_msgs/Float32) - Distance feedback
+- `/joint_states` (sensor_msgs/JointState) - Servo position feedback
+- `/servo_position_controller/commands` (std_msgs/Float64MultiArray) - Servo commands
+- `/camera/image_raw/compressed` (sensor_msgs/CompressedImage) - Camera images
+- `/camera/camera_info` (sensor_msgs/CameraInfo) - Camera metadata
+- `/robot/camera_active` (std_msgs/Bool) - Camera status
 
 **Services:**
 
@@ -506,6 +693,8 @@ The library communicates with these ROS2 topics and services:
 - `/robot/start_navigation` (std_srvs/Trigger) - Start navigation
 - `/robot/stop_navigation` (std_srvs/Trigger) - Stop navigation
 - `/robot/cancel_navigation` (std_srvs/Trigger) - Cancel current goal
+- `/robot/start_camera` (std_srvs/Trigger) - Start camera system
+- `/robot/stop_camera` (std_srvs/Trigger) - Stop camera system
 
 ### Performance Tips
 
@@ -579,3 +768,65 @@ This software is licensed under a commercial license. Educational institutions m
 ---
 
 **Made with ❤️ for STEM Education by [Autobonics](https://bonic.ai/)**
+
+## 🧪 Example Scripts
+
+The library includes ready-to-use example scripts in the `examples/` directory:
+
+### Camera Test
+
+Test camera streaming and image capture:
+
+```bash
+python3 examples/test_camera.py --host <robot_ip>
+```
+
+**Features:**
+- Start/stop camera service
+- Stream compressed images  
+- Display camera info (resolution, distortion model)
+- Save snapshots to file
+
+### Servo Test
+
+Test all servo motors (arms, grippers, neck):
+
+```bash
+python3 examples/test_servos.py --host <robot_ip>
+```
+
+**Features:**
+- Test each servo individually
+- Display servo limits
+- Wave arm demonstration
+- Gripper open/close test
+- Neck rotation test
+
+### Servo Monitor
+
+Real-time display of servo positions:
+
+```bash
+python3 examples/monitor_servos.py --host <robot_ip> --rate 0.2
+```
+
+**Features:**
+- Live servo angle display
+- Configurable update rate
+- Monitor all 7 servos simultaneously
+- Press Ctrl+C to exit
+
+### Integrated Demo
+
+Complete demonstration of all features:
+
+```bash
+python3 examples/demo_integrated.py --host <robot_ip>
+```
+
+**Features:**
+- Camera + servo + navigation
+- Automated test sequence
+- Multiple snapshot capture
+- Movement with servo gestures
+
