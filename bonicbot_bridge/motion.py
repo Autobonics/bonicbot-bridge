@@ -163,6 +163,64 @@ class MotionController:
         print("❌ Navigation goal cancelled")
         return True
     
+    def set_initial_pose(self, x, y, theta=0):
+        """
+        Set initial pose for robot localization
+        
+        Args:
+            x: Initial X coordinate (meters)
+            y: Initial Y coordinate (meters)
+            theta: Initial orientation (radians, default: 0)
+            
+        Returns:
+            bool: True if pose was set successfully
+        """
+        try:
+            # Create initial pose topic
+            initial_pose_pub = Topic(
+                self.ros,
+                '/initialpose',
+                'geometry_msgs/PoseWithCovarianceStamped'
+            )
+            
+            initial_pose_pub.advertise()
+            time.sleep(0.15)  # Wait for topic to be ready
+            
+            # Create pose message
+            pose_msg = {
+                'header': {
+                    'stamp': {
+                        'sec': int(time.time()),
+                        'nanosec': int((time.time() % 1) * 1e9)
+                    },
+                    'frame_id': 'map'
+                },
+                'pose': {
+                    'pose': {
+                        'position': {'x': x, 'y': y, 'z': 0.0},
+                        'orientation': {
+                            'x': 0.0,
+                            'y': 0.0,
+                            'z': math.sin(theta / 2),
+                            'w': math.cos(theta / 2)
+                        }
+                    },
+                    'covariance': [0.0] * 36  # 6x6 covariance matrix
+                }
+            }
+            
+            # Publish initial pose
+            initial_pose_pub.publish(pose_msg)
+            print(f"📍 Initial pose set: ({x:.2f}, {y:.2f}, θ={math.degrees(theta):.1f}°)")
+            
+            time.sleep(0.2)
+            initial_pose_pub.unadvertise()
+            
+            return True
+            
+        except Exception as e:
+            raise NavigationError(f"Failed to set initial pose: {str(e)}")
+    
     def wait_for_goal(self, timeout=30):
         """
         Wait for current navigation goal to complete

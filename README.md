@@ -200,6 +200,24 @@ Cancel current navigation goal.
 bot.cancel_goal()
 ```
 
+#### `set_initial_pose(x, y, theta=0)`
+
+Set the robot's initial pose for localization on a map.
+
+**Parameters:**
+- `x` (float): Initial X coordinate in meters
+- `y` (float): Initial Y coordinate in meters  
+- `theta` (float): Initial orientation in radians (optional)
+
+```python
+# Set robot at origin
+bot.set_initial_pose(0.0, 0.0, 0.0)
+
+# Set with specific orientation
+import math
+bot.set_initial_pose(2.0, 1.5, math.radians(90))
+```
+
 ### Sensor Methods
 
 #### `get_position()`

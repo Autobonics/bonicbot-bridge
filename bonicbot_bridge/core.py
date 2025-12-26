@@ -137,6 +137,10 @@ class BonicBot:
         """Get distance to current navigation goal"""
         return self.motion.get_distance_to_goal()
     
+    def set_initial_pose(self, x, y, theta=0):
+        """Set initial pose for localization"""
+        return self.motion.set_initial_pose(x, y, theta)
+    
     # Camera shortcuts
     def start_camera(self, callback=None):
         """Start camera streaming"""
