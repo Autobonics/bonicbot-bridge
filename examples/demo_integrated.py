@@ -28,11 +28,7 @@ def main():
         status = robot.system.get_system_status()
         for key, value in status.items():
             print(f"   {key}: {value}")
-        
-        # Start camera
-        print("\n📷 Starting camera...")
-        robot.system.start_camera()
-        time.sleep(1)
+    
         
         image_count = 0
         def count_images(img):

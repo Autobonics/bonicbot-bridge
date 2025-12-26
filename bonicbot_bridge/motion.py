@@ -66,31 +66,71 @@ class MotionController:
             speed: Forward speed in m/s (default: 0.3)
             duration: Time to move in seconds (None for continuous)
         """
-        self.move(linear_x=speed)
         if duration:
-            time.sleep(duration)
+            # Continuously publish commands to avoid cmd_vel_timeout
+            publish_rate = 10  # 10 Hz
+            interval = 1.0 / publish_rate
+            start_time = time.time()
+            
+            while (time.time() - start_time) < duration:
+                self.move(linear_x=speed)
+                time.sleep(interval)
+            
             self.stop()
+        else:
+            # Continuous movement (single command)
+            self.move(linear_x=speed)
     
     def move_backward(self, speed=0.3, duration=None):
         """Move robot backward"""
-        self.move(linear_x=-speed)
         if duration:
-            time.sleep(duration)
+            # Continuously publish commands to avoid cmd_vel_timeout
+            publish_rate = 10  # 10 Hz
+            interval = 1.0 / publish_rate
+            start_time = time.time()
+            
+            while (time.time() - start_time) < duration:
+                self.move(linear_x=-speed)
+                time.sleep(interval)
+            
             self.stop()
+        else:
+            # Continuous movement (single command)
+            self.move(linear_x=-speed)
             
     def turn_left(self, speed=0.5, duration=None):
         """Turn robot left (counter-clockwise)"""
-        self.move(angular_z=speed)
         if duration:
-            time.sleep(duration)
+            # Continuously publish commands to avoid cmd_vel_timeout
+            publish_rate = 10  # 10 Hz
+            interval = 1.0 / publish_rate
+            start_time = time.time()
+            
+            while (time.time() - start_time) < duration:
+                self.move(angular_z=speed)
+                time.sleep(interval)
+            
             self.stop()
+        else:
+            # Continuous movement (single command)
+            self.move(angular_z=speed)
             
     def turn_right(self, speed=0.5, duration=None):
         """Turn robot right (clockwise)"""
-        self.move(angular_z=-speed)
         if duration:
-            time.sleep(duration)
+            # Continuously publish commands to avoid cmd_vel_timeout
+            publish_rate = 10  # 10 Hz
+            interval = 1.0 / publish_rate
+            start_time = time.time()
+            
+            while (time.time() - start_time) < duration:
+                self.move(angular_z=-speed)
+                time.sleep(interval)
+            
             self.stop()
+        else:
+            # Continuous movement (single command)
+            self.move(angular_z=-speed)
     
     def stop(self):
         """Stop all robot movement"""

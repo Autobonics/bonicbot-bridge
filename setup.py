@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="bonicbot_bridge",
-    version="0.2.1",
+    version="0.2.2",
     author="Autobonics Pvt Ltd",
     author_email="support@bonic.ai",
     description="Python SDK for educational robotics programming with BonicBot A2",

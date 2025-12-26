@@ -93,22 +93,71 @@ bot = BonicBot(host='bonic.local')
 
 #### `move(linear_x=0, linear_y=0, angular_z=0)`
 
-Low-level velocity control for manual robot movement.
+Low-level velocity control for custom robot movement patterns. This method gives you full control over linear and angular velocities simultaneously.
 
 **Parameters:**
 - `linear_x` (float): Forward/backward velocity in m/s
 - `linear_y` (float): Left/right velocity in m/s (for omnidirectional robots)
 - `angular_z` (float): Rotational velocity in deg/s
 
-```python
-# Move forward while turning
-bot.motion.move(linear_x=0.3, angular_z=45)
+**⚠️ Important**: Due to ROS2's `cmd_vel_timeout` (typically 0.5s), commands must be **continuously published** to maintain movement. For duration-based control, publish in a loop at 10Hz.
 
-# Stop
-bot.motion.move(0, 0, 0)
-# or
+**Basic Usage:**
+
+```python
+# Simple forward movement (continuous until stopped)
+bot.motion.move(linear_x=0.3)
+# ... robot moves forward
+bot.stop()  # Stop when done
+
+# Pure rotation (spin in place)
+bot.motion.move(angular_z=30.0)  # 30 deg/s
+# ... robot spins
 bot.stop()
 ```
+
+**Duration Control Pattern:**
+
+For timed movements, publish commands in a loop:
+
+```python
+import time
+
+# Move forward for 3 seconds
+start = time.time()
+while (time.time() - start) < 3.0:
+    bot.motion.move(linear_x=0.3)
+    time.sleep(0.1)  # Publish at 10Hz
+bot.stop()
+```
+
+**Advanced Patterns:**
+
+```python
+# Circular arc (forward + rotation)
+start = time.time()
+while (time.time() - start) < 5.0:
+    bot.motion.move(linear_x=0.2, angular_z=20.0)  # Drive in circle
+    time.sleep(0.1)
+bot.stop()
+
+# Figure-8 pattern
+# Left arc
+start = time.time()
+while (time.time() - start) < 2.5:
+    bot.motion.move(linear_x=0.2, angular_z=30.0)
+    time.sleep(0.1)
+
+# Right arc
+start = time.time()
+while (time.time() - start) < 2.5:
+    bot.motion.move(linear_x=0.2, angular_z=-30.0)
+    time.sleep(0.1)
+
+bot.stop()
+```
+
+**💡 Tip**: For simple forward/backward/turn movements with automatic duration control, use the convenience methods (`move_forward()`, `turn_left()`, etc.) instead. They handle the continuous publishing automatically.
 
 #### `move_forward(speed, duration=None)`
 
