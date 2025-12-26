@@ -33,7 +33,7 @@ class SensorManager:
         Get current robot position
         
         Returns:
-            dict: {'x': float, 'y': float, 'theta': float} or None if no data
+            dict: {'x': float, 'y': float, 'theta': float (degrees)} or None if no data
         """
         if not self.current_pose:
             return None
@@ -41,14 +41,16 @@ class SensorManager:
         pos = self.current_pose['position']
         orientation = self.current_pose['orientation']
         
-        # Convert quaternion to yaw angle
+        # Convert quaternion to yaw angle (in radians first)
         import math
-        theta = 2 * math.atan2(orientation['z'], orientation['w'])
+        theta_rad = 2 * math.atan2(orientation['z'], orientation['w'])
+        # Convert to degrees
+        theta_deg = math.degrees(theta_rad)
         
         return {
             'x': pos['x'],
             'y': pos['y'], 
-            'theta': theta
+            'theta': theta_deg
         }
     
     def get_x(self):
@@ -62,15 +64,13 @@ class SensorManager:
         return pos['y'] if pos else 0.0
         
     def get_heading(self):
-        """Get current robot heading in radians"""
+        """Get current robot heading in degrees"""
         pos = self.get_position()
         return pos['theta'] if pos else 0.0
         
     def get_heading_degrees(self):
-        """Get current robot heading in degrees"""
-        import math
-        heading_rad = self.get_heading()
-        return math.degrees(heading_rad)
+        """Get current robot heading in degrees (alias for get_heading)"""
+        return self.get_heading()
     
     def get_battery(self):
         """

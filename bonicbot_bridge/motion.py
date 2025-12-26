@@ -47,11 +47,14 @@ class MotionController:
         Args:
             linear_x: Forward/backward velocity (m/s)
             linear_y: Left/right velocity (m/s) - for omnidirectional robots
-            angular_z: Rotational velocity (rad/s)
+            angular_z: Rotational velocity (deg/s)
         """
+        # Convert angular velocity from deg/s to rad/s for ROS
+        angular_z_rad = math.radians(angular_z)
+        
         msg = {
             'linear': {'x': linear_x, 'y': linear_y, 'z': 0.0},
-            'angular': {'x': 0.0, 'y': 0.0, 'z': angular_z}
+            'angular': {'x': 0.0, 'y': 0.0, 'z': angular_z_rad}
         }
         self.cmd_vel_pub.publish(msg)
     
@@ -100,12 +103,15 @@ class MotionController:
         Args:
             x: Target X coordinate (meters)
             y: Target Y coordinate (meters) 
-            theta: Target orientation (radians, default: 0)
+            theta: Target orientation (degrees, default: 0)
             
         Returns:
             bool: True if goal was sent successfully
         """
         try:
+            # Convert degrees to radians for ROS message
+            theta_rad = math.radians(theta)
+            
             # Create goal message
             goal_msg = {
                 'header': {
@@ -116,15 +122,15 @@ class MotionController:
                     'position': {'x': x, 'y': y, 'z': 0.0},
                     'orientation': {
                         'x': 0.0, 'y': 0.0, 
-                        'z': math.sin(theta/2), 
-                        'w': math.cos(theta/2)
+                        'z': math.sin(theta_rad/2), 
+                        'w': math.cos(theta_rad/2)
                     }
                 }
             }
             
             # Publish goal
             self.goal_pub.publish(goal_msg)
-            print(f"🎯 Navigation goal set: ({x:.2f}, {y:.2f})")
+            print(f"🎯 Navigation goal set: ({x:.2f}, {y:.2f}, θ={theta:.1f}°)")
             return True
             
         except Exception as e:
@@ -170,12 +176,15 @@ class MotionController:
         Args:
             x: Initial X coordinate (meters)
             y: Initial Y coordinate (meters)
-            theta: Initial orientation (radians, default: 0)
+            theta: Initial orientation (degrees, default: 0)
             
         Returns:
             bool: True if pose was set successfully
         """
         try:
+            # Convert degrees to radians for ROS message
+            theta_rad = math.radians(theta)
+            
             # Create initial pose topic
             initial_pose_pub = Topic(
                 self.ros,
@@ -201,8 +210,8 @@ class MotionController:
                         'orientation': {
                             'x': 0.0,
                             'y': 0.0,
-                            'z': math.sin(theta / 2),
-                            'w': math.cos(theta / 2)
+                            'z': math.sin(theta_rad / 2),
+                            'w': math.cos(theta_rad / 2)
                         }
                     },
                     'covariance': [0.0] * 36  # 6x6 covariance matrix
@@ -211,7 +220,7 @@ class MotionController:
             
             # Publish initial pose
             initial_pose_pub.publish(pose_msg)
-            print(f"📍 Initial pose set: ({x:.2f}, {y:.2f}, θ={math.degrees(theta):.1f}°)")
+            print(f"📍 Initial pose set: ({x:.2f}, {y:.2f}, θ={theta:.1f}°)")
             
             time.sleep(0.2)
             initial_pose_pub.unadvertise()

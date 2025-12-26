@@ -27,29 +27,14 @@ bot.move_forward(speed=0.3, duration=2)
 bot.turn_left(speed=0.5, duration=1)
 bot.stop()
 
-# Navigation
-bot.start_navigation()
-bot.go_to(x=2.0, y=1.5)
-bot.wait_for_goal()
-
 # Sensors
 position = bot.get_position()
 print(f"Robot is at: {position}")
-
-# Camera
-bot.start_camera()
-image = bot.get_image()
-bot.save_image('snapshot.jpg')
 
 # Servo control
 bot.move_left_arm(90, 30)  # shoulder, elbow angles
 bot.look_left()
 bot.open_grippers()
-
-# System control
-bot.start_mapping()
-# Drive around to create map...
-bot.save_map()
 
 # Disconnect
 bot.disconnect()
@@ -105,6 +90,25 @@ bot = BonicBot(host='bonic.local')
 ```
 
 ### Movement Methods
+
+#### `move(linear_x=0, linear_y=0, angular_z=0)`
+
+Low-level velocity control for manual robot movement.
+
+**Parameters:**
+- `linear_x` (float): Forward/backward velocity in m/s
+- `linear_y` (float): Left/right velocity in m/s (for omnidirectional robots)
+- `angular_z` (float): Rotational velocity in deg/s
+
+```python
+# Move forward while turning
+bot.motion.move(linear_x=0.3, angular_z=45)
+
+# Stop
+bot.motion.move(0, 0, 0)
+# or
+bot.stop()
+```
 
 #### `move_forward(speed, duration=None)`
 
@@ -173,11 +177,11 @@ Navigate to specific coordinates autonomously.
 
 - `x` (float): Target X coordinate in meters
 - `y` (float): Target Y coordinate in meters
-- `theta` (float): Target orientation in radians (optional)
+- `theta` (float): Target orientation in degrees (optional)
 
 ```python
 bot.go_to(2.0, 1.5)             # Navigate to (2.0, 1.5)
-bot.go_to(0, 0, 1.57)           # Go to origin facing 90 degrees
+bot.go_to(0, 0, 90)             # Go to origin facing 90 degrees
 ```
 
 #### `wait_for_goal(timeout=30)`
@@ -207,15 +211,14 @@ Set the robot's initial pose for localization on a map.
 **Parameters:**
 - `x` (float): Initial X coordinate in meters
 - `y` (float): Initial Y coordinate in meters  
-- `theta` (float): Initial orientation in radians (optional)
+- `theta` (float): Initial orientation in degrees (optional)
 
 ```python
 # Set robot at origin
 bot.set_initial_pose(0.0, 0.0, 0.0)
 
-# Set with specific orientation
-import math
-bot.set_initial_pose(2.0, 1.5, math.radians(90))
+# Set with specific orientation (90 degrees)
+bot.set_initial_pose(2.0, 1.5, 90)
 ```
 
 ### Sensor Methods
@@ -224,12 +227,12 @@ bot.set_initial_pose(2.0, 1.5, math.radians(90))
 
 Get current robot position and orientation.
 
-**Returns:** Dict with keys 'x', 'y', 'theta' or None if no data available
+**Returns:** Dict with keys 'x', 'y', 'theta' (degrees) or None if no data available
 
 ```python
 pos = bot.get_position()
 if pos:
-    print(f"X: {pos['x']:.2f}, Y: {pos['y']:.2f}, Heading: {pos['theta']:.2f}")
+    print(f"X: {pos['x']:.2f}, Y: {pos['y']:.2f}, Heading: {pos['theta']:.2f}°")
 ```
 
 #### `get_x()`, `get_y()`, `get_heading()`
@@ -239,7 +242,7 @@ Get individual position components.
 ```python
 x = bot.get_x()                 # Current X position
 y = bot.get_y()                 # Current Y position
-heading = bot.get_heading()     # Current heading in radians
+heading = bot.get_heading()     # Current heading in degrees
 ```
 
 #### `get_heading_degrees()`
@@ -247,7 +250,7 @@ heading = bot.get_heading()     # Current heading in radians
 Get current heading in degrees.
 
 ```python
-heading_deg = bot.get_heading_degrees()
+heading_deg = bot.get_heading_degrees()  # Same as get_heading()
 ```
 
 #### `get_battery()`
