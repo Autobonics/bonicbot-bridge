@@ -67,10 +67,6 @@ class SensorManager:
         """Get current robot heading in degrees"""
         pos = self.get_position()
         return pos['theta'] if pos else 0.0
-        
-    def get_heading_degrees(self):
-        """Get current robot heading in degrees (alias for get_heading)"""
-        return self.get_heading()
     
     def get_battery(self):
         """

@@ -112,6 +112,18 @@ class BonicBot:
     def get_position(self):
         """Get current robot position"""
         return self.sensors.get_position()
+    
+    def get_x(self):
+        """Get current X position in meters"""
+        return self.sensors.get_x()
+    
+    def get_y(self):
+        """Get current Y position in meters"""
+        return self.sensors.get_y()
+    
+    def get_heading(self):
+        """Get current robot heading in degrees"""
+        return self.sensors.get_heading()
         
     def start_mapping(self):
         """Start mapping mode"""
@@ -124,6 +136,38 @@ class BonicBot:
     def save_map(self):
         """Save current map"""
         return self.system.save_map()
+    
+    def start_navigation(self):
+        """Start navigation system"""
+        return self.motion.start_navigation()
+    
+    def stop_navigation(self):
+        """Stop navigation system"""
+        return self.motion.stop_navigation()
+    
+    def cancel_goal(self):
+        """Cancel current navigation goal"""
+        return self.motion.cancel_goal()
+    
+    def get_nav_status(self):
+        """Get current navigation status"""
+        return self.motion.get_nav_status()
+    
+    def is_moving(self):
+        """Check if robot is currently moving"""
+        return self.motion.is_moving()
+    
+    def get_system_status(self):
+        """Get system status information"""
+        return self.system.get_system_status()
+    
+    def is_mapping(self):
+        """Check if robot is currently mapping"""
+        return self.system.is_mapping()
+    
+    def is_navigating(self):
+        """Check if navigation system is active"""
+        return self.system.is_navigating()
     
     def is_connected(self):
         """Check if connected to robot"""
