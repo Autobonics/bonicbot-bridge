@@ -367,9 +367,65 @@ if bot.is_connected():
 
 ### Camera Methods
 
-#### `start_camera(callback=None)`
+**Important**: Camera operations have two parts:
+1. **Hardware control** (server-side): Activates/deactivates physical camera
+2. **Streaming control** (client-side): Subscribes/unsubscribes to camera images
 
-Start camera streaming with optional callback for real-time processing.
+**Recommended workflow:**
+
+```python
+# 1. Activate camera hardware
+bot.camera.start_camera_service()
+
+# 2. Start receiving images
+bot.start_camera()
+bot.camera.wait_for_image(timeout=3.0)
+
+# 3. Use camera
+bot.save_image("photo.jpg")
+
+# 4. Stop receiving images
+bot.stop_camera()
+
+# 5. Deactivate hardware (important for performance!)
+bot.camera.stop_camera_service()
+```
+
+---
+
+#### Hardware Control (Server-Side)
+
+##### `camera.start_camera_service()`
+
+Activate the robot's physical camera hardware.
+
+```python
+bot.camera.start_camera_service()  # Turn ON camera
+```
+
+##### `camera.stop_camera_service()`
+
+Deactivate camera hardware to free up resources.
+
+```python
+bot.camera.stop_camera_service()  # Turn OFF camera
+```
+
+##### `system.is_camera_active()`
+
+Check if camera hardware is currently activated.
+
+```python
+is_active = bot.system.is_camera_active()  # Returns True/False
+```
+
+---
+
+#### Streaming Control (Client-Side)
+
+##### `start_camera(callback=None)`
+
+Start subscribing to camera images in your script.
 
 **Parameters:**
 - `callback` (function): Optional function called for each frame: `callback(image)`
@@ -378,22 +434,34 @@ Start camera streaming with optional callback for real-time processing.
 # Simple streaming
 bot.start_camera()
 
-# With callback for processing
+# With callback for real-time processing
 def process_frame(image):
     print(f"Frame: {image.shape}")
     
 bot.start_camera(callback=process_frame)
 ```
 
-#### `stop_camera()`
+##### `stop_camera()`
 
-Stop camera streaming.
+Stop subscribing to camera images.
 
 ```python
 bot.stop_camera()
 ```
 
-#### `get_image()`
+##### `camera.is_streaming()`
+
+Check if currently receiving images.
+
+```python
+is_streaming = bot.camera.is_streaming()  # Returns True/False
+```
+
+---
+
+#### Image Access
+
+##### `get_image()`
 
 Get the latest camera image as numpy array (BGR format).
 
@@ -405,12 +473,52 @@ if image is not None:
     print(f"Image shape: {image.shape}")
 ```
 
-#### `save_image(filepath)`
+##### `save_image(filepath)`
 
 Save current camera image to file.
 
 ```python
 bot.save_image("robot_view.jpg")
+```
+
+##### `camera.wait_for_image(timeout)`
+
+Wait for first image to arrive.
+
+```python
+bot.camera.wait_for_image(timeout=5.0)  # Wait up to 5 seconds
+```
+
+##### `camera.get_camera_info()`
+
+Get camera metadata (resolution, distortion model, etc.).
+
+```python
+info = bot.camera.get_camera_info()
+print(f"Resolution: {info['width']}x{info['height']}")
+```
+
+---
+
+#### Complete Example
+
+```python
+with BonicBot(host='192.168.1.100') as bot:
+    # Activate hardware
+    bot.camera.start_camera_service()
+    
+    # Start receiving images
+    bot.start_camera()
+    bot.camera.wait_for_image(timeout=3.0)
+    
+    # Capture photo
+    bot.save_image("destination.jpg")
+    
+    # Stop receiving
+    bot.stop_camera()
+    
+    # Deactivate hardware
+    bot.camera.stop_camera_service()
 ```
 
 ### Servo Control Methods

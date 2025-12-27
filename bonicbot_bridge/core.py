@@ -185,13 +185,26 @@ class BonicBot:
         """Set initial pose for localization"""
         return self.motion.set_initial_pose(x, y, theta)
     
-    # Camera shortcuts
+    # Camera methods
     def start_camera(self, callback=None):
-        """Start camera streaming"""
+        """
+        Start camera streaming (client-side subscription)
+        
+        Note: Call camera.start_camera_service() first to activate robot's camera hardware,
+        then call this to start receiving images in your script.
+        
+        Args:
+            callback: Optional function(image) called for each frame
+        """
         return self.camera.start_streaming(callback=callback)
     
     def stop_camera(self):
-        """Stop camera streaming"""
+        """
+        Stop camera streaming (client-side subscription)
+        
+        Note: Call camera.stop_camera_service() after this to deactivate robot's camera
+        hardware for better performance.
+        """
         return self.camera.stop_streaming()
     
     def get_image(self):
