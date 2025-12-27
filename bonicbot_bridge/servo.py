@@ -170,6 +170,10 @@ class ServoController:
             msg = {'data': [shoulder_rad, elbow_rad]}
             self.left_arm_pub.publish(msg)
             
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
+            
             # Update internal state
             self.current_angles['left_shoulder'] = shoulder
             self.current_angles['left_elbow'] = elbow
@@ -202,6 +206,10 @@ class ServoController:
             # Publish command [shoulder, elbow]
             msg = {'data': [shoulder_rad, elbow_rad]}
             self.right_arm_pub.publish(msg)
+            
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
             
             # Update internal state
             self.current_angles['right_shoulder'] = shoulder
@@ -238,6 +246,10 @@ class ServoController:
             
             self.left_gripper_pub.publish(left_msg)
             self.right_gripper_pub.publish(right_msg)
+            
+            # Small delay to ensure messages are transmitted
+            import time
+            time.sleep(0.1)
             
             # Update internal state
             self.current_angles['left_gripper'] = left
@@ -287,6 +299,10 @@ class ServoController:
             msg = {'data': [angle_rad]}
             self.left_gripper_pub.publish(msg)
             
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
+            
             # Update internal state
             self.current_angles['left_gripper'] = angle
             
@@ -316,6 +332,10 @@ class ServoController:
             msg = {'data': [angle_rad]}
             self.right_gripper_pub.publish(msg)
             
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
+            
             # Update internal state
             self.current_angles['right_gripper'] = angle
             
@@ -344,6 +364,10 @@ class ServoController:
             # Publish command [yaw]
             msg = {'data': [yaw_rad]}
             self.head_pub.publish(msg)
+            
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
             
             # Update internal state
             self.current_angles['neck_yaw'] = yaw
@@ -397,10 +421,17 @@ class ServoController:
         """
         Get current servo angles
         
+        Note: Includes small delay to ensure joint state feedback has updated
+        
         Returns:
-            dict: Current angles in degrees for all servos
+            dict: Current angles in degrees for all servos (rounded to 2 decimal places)
         """
-        return dict(self.current_angles)
+        # Wait for joint state feedback to update
+        import time
+        time.sleep(0.5)
+        
+        # Round all values to 2 decimal places for cleaner output
+        return {joint: round(angle, 2) for joint, angle in self.current_angles.items()}
     
     def get_servo_limits(self):
         """
