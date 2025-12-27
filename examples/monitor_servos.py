@@ -29,25 +29,25 @@ def print_servo_display(angles):
     
     # Left Arm
     print("👈 LEFT ARM:")
-    print(f"   Shoulder: {format_angle(angles['left_shoulder_pitch_joint']):>10}")
-    print(f"   Elbow:    {format_angle(angles['left_elbow_joint']):>10}")
+    print(f"   Shoulder: {format_angle(angles['left_shoulder']):>10}")
+    print(f"   Elbow:    {format_angle(angles['left_elbow']):>10}")
     print()
     
     # Right Arm
     print("👉 RIGHT ARM:")
-    print(f"   Shoulder: {format_angle(angles['right_shoulder_pitch_joint']):>10}")
-    print(f"   Elbow:    {format_angle(angles['right_elbow_joint']):>10}")
+    print(f"   Shoulder: {format_angle(angles['right_shoulder']):>10}")
+    print(f"   Elbow:    {format_angle(angles['right_elbow']):>10}")
     print()
     
     # Grippers
     print("🤏 GRIPPERS:")
-    print(f"   Left:     {format_angle(angles['left_gripper_finger1_joint']):>10}")
-    print(f"   Right:    {format_angle(angles['right_gripper_finger1_joint']):>10}")
+    print(f"   Left:     {format_angle(angles['left_gripper']):>10}")
+    print(f"   Right:    {format_angle(angles['right_gripper']):>10}")
     print()
     
     # Neck
     print("👀 NECK:")
-    print(f"   Yaw:      {format_angle(angles['neck_yaw_joint']):>10}")
+    print(f"   Yaw:      {format_angle(angles['neck_yaw']):>10}")
     print()
     
     print("=" * 70)

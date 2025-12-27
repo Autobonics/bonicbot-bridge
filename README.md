@@ -523,19 +523,9 @@ with BonicBot(host='192.168.1.100') as bot:
 
 ### Servo Control Methods
 
-#### `set_servos(angles)`
+**Architecture**: The servo system uses separate ROS2 controller topics for each group (left arm, right arm, head, grippers).
 
-Set multiple servo angles at once.
-
-**Parameters:**
-- `angles` (dict): Dictionary mapping joint names to angles in degrees
-
-```python
-bot.set_servos({
-    'left_shoulder_pitch_joint': 45.0,
-    'neck_yaw_joint': -30.0
-})
-```
+---
 
 #### `move_left_arm(shoulder, elbow)` / `move_right_arm(shoulder, elbow)`
 
@@ -550,17 +540,48 @@ bot.move_left_arm(90, 30)   # Left arm up
 bot.move_right_arm(45, 20)  # Right arm halfway
 ```
 
-#### `set_grippers(left, right)` / `open_grippers()` / `close_grippers()`
+---
 
-Control gripper fingers.
+#### Gripper Control
+
+##### `set_grippers(left, right)`
+
+Control both grippers simultaneously.
+
+**Parameters:**
+- `left` (float): Left gripper angle (-45° to 60°)
+- `right` (float): Right gripper angle (-45° to 60°)
 
 ```python
-bot.open_grippers()         # Open both grippers
-bot.close_grippers()        # Close both grippers
 bot.set_grippers(30, 30)    # Partial open
 ```
 
-#### `set_neck(yaw)` / `look_left()` / `look_right()` / `look_center()`
+##### `set_left_gripper(angle)` / `set_right_gripper(angle)`
+
+Control individual grippers independently.
+
+**Parameters:**
+- `angle` (float): Gripper angle (-45° to 60°)
+
+```python
+bot.servo.set_left_gripper(30)   # Left gripper only
+bot.servo.set_right_gripper(45)  # Right gripper only
+```
+
+##### `open_grippers()` / `close_grippers()`
+
+Convenience methods for both grippers.
+
+```python
+bot.open_grippers()         # Open both to 60°
+bot.close_grippers()        # Close both to 0°
+```
+
+---
+
+#### Neck Control
+
+##### `set_neck(yaw)`
 
 Control neck rotation.
 
@@ -569,9 +590,20 @@ Control neck rotation.
 
 ```python
 bot.set_neck(-45)   # Look right 45°
-bot.look_left()     # Turn fully left
-bot.look_center()   # Center position
+bot.set_neck(0)     # Center
 ```
+
+##### `look_left()` / `look_right()` / `look_center()`
+
+Convenience methods for common neck positions.
+
+```python
+bot.look_left()     # Turn fully left (90°)
+bot.look_right()    # Turn fully right (-90°)
+bot.look_center()   # Center position (0°)
+```
+
+---
 
 #### `reset_servos()`
 
@@ -580,6 +612,23 @@ Reset all servos to neutral position (0°).
 ```python
 bot.reset_servos()
 ```
+
+---
+
+#### Technical Details
+
+**ROS2 Topics:**
+- `/left_arm_controller/commands` - [shoulder, elbow]
+- `/right_arm_controller/commands` - [shoulder, elbow]
+- `/head_controller/commands` - [yaw]
+- `/left_gripper_controller/commands` - [finger1]
+- `/right_gripper_controller/commands` - [finger1]
+
+**Angle Limits:**
+- Shoulder: -45° to 180°
+- Elbow: 0° to 50°
+- Gripper: -45° to 60°
+- Neck: -90° to 90°
 
 ### Example 5: Camera Vision
 

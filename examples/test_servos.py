@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Servo Test Script
-Tests servo control functionality of the BonicBot bridge library
+Tests servo control functionality including individual gripper control
 """
 
 import argparse
@@ -64,13 +64,13 @@ def main():
         robot.move_right_arm(0, 0)
         time.sleep(1)
         
-        # Test grippers
-        print("\n6. Testing grippers...")
-        print("   Opening grippers")
+        # Test both grippers together
+        print("\n6. Testing both grippers together...")
+        print("   Opening both grippers")
         robot.open_grippers()
         time.sleep(1.5)
         
-        print("   Closing grippers")
+        print("   Closing both grippers")
         robot.close_grippers()
         time.sleep(1.5)
         
@@ -78,8 +78,26 @@ def main():
         robot.set_grippers(0, 0)
         time.sleep(1)
         
+        # Test individual grippers
+        print("\n7. Testing individual grippers...")
+        print("   Opening left gripper only (45°)")
+        robot.servo.set_left_gripper(45)
+        time.sleep(1.5)
+        
+        print("   Opening right gripper only (45°)")
+        robot.servo.set_right_gripper(45)
+        time.sleep(1.5)
+        
+        print("   Closing left gripper")
+        robot.servo.set_left_gripper(0)
+        time.sleep(1.5)
+        
+        print("   Closing right gripper")
+        robot.servo.set_right_gripper(0)
+        time.sleep(1)
+        
         # Test neck
-        print("\n7. Testing neck...")
+        print("\n8. Testing neck...")
         print("   Looking left")
         robot.look_left()
         time.sleep(1.5)
@@ -92,26 +110,23 @@ def main():
         robot.look_center()
         time.sleep(1)
         
-        # Wave demo
-        print("\n8. Demo: Wave left arm")
-        robot.servo.wave_left_arm(duration=3.0)
-        
-        print("\n9. Demo: Wave right arm")
-        robot.servo.wave_right_arm(duration=3.0)
-        
         # Final reset
-        print("\n10. Final reset to neutral...")
+        print("\n9. Final reset to neutral...")
         robot.reset_servos()
         time.sleep(1)
         
         # Display current servo angles
-        print("\n11. Current servo angles:")
+        print("\n10. Current servo angles:")
         angles = robot.servo.get_servo_angles()
         for joint, angle in angles.items():
             print(f"   {joint}: {angle:.2f}°")
         
         print("\n" + "="*60)
         print("✅ Servo test completed successfully!")
+        print("\nNew features tested:")
+        print("  - Separate ROS2 controller topics")
+        print("  - Individual gripper control methods")
+        print("  - All movements use degrees API")
         print("="*60)
 
 if __name__ == '__main__':

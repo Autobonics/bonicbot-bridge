@@ -1,65 +1,95 @@
 """
 Servo controller for robot arm, gripper, and neck control
+Updated for separate controller groups
 """
 
 import math
 from roslibpy import Topic
 from .exceptions import BonicBotError
 
-# Servo joint names and their limits (min, max) in degrees
-SERVO_JOINTS = {
-    'left_shoulder_pitch_joint': (-45.0, 180.0),
-    'left_elbow_joint': (0.0, 50.0),
-    'right_shoulder_pitch_joint': (-45.0, 180.0),
-    'right_elbow_joint': (0.0, 50.0),
-    'left_gripper_finger1_joint': (-45.0, 60.0),
-    'right_gripper_finger1_joint': (-45.0, 60.0),
-    'neck_yaw_joint': (-90.0, 90.0),
+# Servo joint limits (min, max) in degrees
+# Note: User API uses degrees, but ROS topics use radians
+SERVO_LIMITS = {
+    # Arms (shoulder, elbow)
+    'left_shoulder': (-45.0, 180.0),
+    'left_elbow': (0.0, 50.0),
+    'right_shoulder': (-45.0, 180.0),
+    'right_elbow': (0.0, 50.0),
+    # Grippers
+    'left_gripper': (-45.0, 60.0),
+    'right_gripper': (-45.0, 60.0),
+    # Head
+    'neck_yaw': (-90.0, 90.0),
 }
-
-# Order of servos in the command array
-SERVO_ORDER = [
-    'left_shoulder_pitch_joint',
-    'left_elbow_joint',
-    'right_shoulder_pitch_joint',
-    'right_elbow_joint',
-    'left_gripper_finger1_joint',
-    'right_gripper_finger1_joint',
-    'neck_yaw_joint',
-]
 
 class ServoController:
     def __init__(self, ros_client):
         """
-        Initialize servo controller
+        Initialize servo controller with separate group publishers
         
         Args:
             ros_client: Connected roslibpy Ros instance
         """
         self.ros = ros_client
         
-        # Servo command publisher
-        self.servo_pub = Topic(
+        # Create separate publishers for each controller group
+        self.left_arm_pub = Topic(
             self.ros,
-            '/servo_position_controller/commands',
+            '/left_arm_controller/commands',
             'std_msgs/Float64MultiArray'
         )
         
-        # Joint state subscriber
+        self.right_arm_pub = Topic(
+            self.ros,
+            '/right_arm_controller/commands',
+            'std_msgs/Float64MultiArray'
+        )
+        
+        self.head_pub = Topic(
+            self.ros,
+            '/head_controller/commands',
+            'std_msgs/Float64MultiArray'
+        )
+        
+        self.left_gripper_pub = Topic(
+            self.ros,
+            '/left_gripper_controller/commands',
+            'std_msgs/Float64MultiArray'
+        )
+        
+        self.right_gripper_pub = Topic(
+            self.ros,
+            '/right_gripper_controller/commands',
+            'std_msgs/Float64MultiArray'
+        )
+        
+        # Joint state subscriber for feedback
         self.joint_state_sub = Topic(
             self.ros,
             '/joint_states',
             'sensor_msgs/JointState'
         )
         
-        # Current servo angles (in degrees)
-        self.current_angles = {joint: 0.0 for joint in SERVO_JOINTS}
+        # Current servo angles (in degrees for user convenience)
+        self.current_angles = {
+            'left_shoulder': 0.0,
+            'left_elbow': 0.0,
+            'right_shoulder': 0.0,
+            'right_elbow': 0.0,
+            'left_gripper': 0.0,
+            'right_gripper': 0.0,
+            'neck_yaw': 0.0,
+        }
         
         # Subscribe to joint states for feedback
         self.joint_state_sub.subscribe(self._joint_state_callback)
         
-        # Advertise servo publisher
-        self.servo_pub.advertise()
+        # Advertise all publishers
+        self.left_arm_pub.advertise()
+        self.right_arm_pub.advertise()
+        self.head_pub.advertise()
+        self.left_gripper_pub.advertise()
+        self.right_gripper_pub.advertise()
     
     def _joint_state_callback(self, msg):
         """
@@ -72,12 +102,24 @@ class ServoController:
             names = msg.get('name', [])
             positions = msg.get('position', [])
             
+            # Map ROS joint names to our simplified names
+            joint_map = {
+                'left_shoulder_pitch_joint': 'left_shoulder',
+                'left_elbow_joint': 'left_elbow',
+                'right_shoulder_pitch_joint': 'right_shoulder',
+                'right_elbow_joint': 'right_elbow',
+                'left_gripper_finger1_joint': 'left_gripper',
+                'right_gripper_finger1_joint': 'right_gripper',
+                'neck_yaw_joint': 'neck_yaw',
+            }
+            
             # Extract servo angles (convert radians to degrees)
             for i, name in enumerate(names):
-                if name in self.current_angles and i < len(positions):
+                if name in joint_map and i < len(positions):
+                    simplified_name = joint_map[name]
                     radians = positions[i]
                     degrees = math.degrees(radians)
-                    self.current_angles[name] = degrees
+                    self.current_angles[simplified_name] = degrees
                     
         except Exception as e:
             print(f"⚠️ Error processing joint states: {e}")
@@ -87,97 +129,22 @@ class ServoController:
         Validate and clamp servo angle to hardware limits
         
         Args:
-            joint_name: Name of the servo joint
+            joint_name: Simplified joint name (e.g. 'left_shoulder')
             angle: Target angle in degrees
             
         Returns:
             float: Clamped angle within valid range
         """
-        if joint_name not in SERVO_JOINTS:
+        if joint_name not in SERVO_LIMITS:
             raise BonicBotError(f"Unknown servo joint: {joint_name}")
         
-        min_angle, max_angle = SERVO_JOINTS[joint_name]
+        min_angle, max_angle = SERVO_LIMITS[joint_name]
         
         if angle < min_angle or angle > max_angle:
             print(f"⚠️ Angle {angle}° for {joint_name} outside limits [{min_angle}°, {max_angle}°], clamping")
             angle = max(min_angle, min(max_angle, angle))
         
         return angle
-    
-    def set_servo_angles(self, angles):
-        """
-        Set multiple servo angles
-        
-        Args:
-            angles: Dictionary mapping joint names to target angles in degrees
-                   Example: {'left_shoulder_pitch_joint': 45.0, 'neck_yaw_joint': -30.0}
-                   
-        Returns:
-            bool: True if command sent successfully
-        """
-        try:
-            # Start with current angles
-            target_angles = dict(self.current_angles)
-            
-            # Update with requested angles (validate each)
-            for joint_name, angle in angles.items():
-                validated_angle = self._validate_angle(joint_name, angle)
-                target_angles[joint_name] = validated_angle
-            
-            # Build command array in correct order (convert degrees to radians)
-            command_data = [
-                math.radians(target_angles[joint])
-                for joint in SERVO_ORDER
-            ]
-            
-            # Publish command
-            msg = {'data': command_data}
-            self.servo_pub.publish(msg)
-            
-            # Update internal state
-            self.current_angles.update(target_angles)
-            
-            return True
-            
-        except Exception as e:
-            raise BonicBotError(f"Failed to set servo angles: {str(e)}")
-    
-    def set_single_servo(self, joint_name, angle):
-        """
-        Set a single servo angle
-        
-        Args:
-            joint_name: Name of the servo joint
-            angle: Target angle in degrees
-            
-        Returns:
-            bool: True if command sent successfully
-        """
-        return self.set_servo_angles({joint_name: angle})
-    
-    def get_servo_angles(self):
-        """
-        Get current servo angles
-        
-        Returns:
-            dict: Current angles in degrees for all servos
-        """
-        return dict(self.current_angles)
-    
-    def get_single_servo(self, joint_name):
-        """
-        Get a single servo's current angle
-        
-        Args:
-            joint_name: Name of the servo joint
-            
-        Returns:
-            float: Current angle in degrees
-        """
-        if joint_name not in self.current_angles:
-            raise BonicBotError(f"Unknown servo joint: {joint_name}")
-        
-        return self.current_angles[joint_name]
     
     def move_left_arm(self, shoulder, elbow):
         """
@@ -190,10 +157,27 @@ class ServoController:
         Returns:
             bool: True if command sent successfully
         """
-        return self.set_servo_angles({
-            'left_shoulder_pitch_joint': shoulder,
-            'left_elbow_joint': elbow,
-        })
+        try:
+            # Validate angles
+            shoulder = self._validate_angle('left_shoulder', shoulder)
+            elbow = self._validate_angle('left_elbow', elbow)
+            
+            # Convert to radians
+            shoulder_rad = math.radians(shoulder)
+            elbow_rad = math.radians(elbow)
+            
+            # Publish command [shoulder, elbow]
+            msg = {'data': [shoulder_rad, elbow_rad]}
+            self.left_arm_pub.publish(msg)
+            
+            # Update internal state
+            self.current_angles['left_shoulder'] = shoulder
+            self.current_angles['left_elbow'] = elbow
+            
+            return True
+            
+        except Exception as e:
+            raise BonicBotError(f"Failed to move left arm: {str(e)}")
     
     def move_right_arm(self, shoulder, elbow):
         """
@@ -206,26 +190,63 @@ class ServoController:
         Returns:
             bool: True if command sent successfully
         """
-        return self.set_servo_angles({
-            'right_shoulder_pitch_joint': shoulder,
-            'right_elbow_joint': elbow,
-        })
+        try:
+            # Validate angles
+            shoulder = self._validate_angle('right_shoulder', shoulder)
+            elbow = self._validate_angle('right_elbow', elbow)
+            
+            # Convert to radians
+            shoulder_rad = math.radians(shoulder)
+            elbow_rad = math.radians(elbow)
+            
+            # Publish command [shoulder, elbow]
+            msg = {'data': [shoulder_rad, elbow_rad]}
+            self.right_arm_pub.publish(msg)
+            
+            # Update internal state
+            self.current_angles['right_shoulder'] = shoulder
+            self.current_angles['right_elbow'] = elbow
+            
+            return True
+            
+        except Exception as e:
+            raise BonicBotError(f"Failed to move right arm: {str(e)}")
     
     def set_grippers(self, left, right):
         """
         Control both gripper fingers
         
         Args:
-            left: Left gripper angle in degrees (-45 to 60)
-            right: Right gripper angle in degrees (-45 to 60)
+            left: Left gripper angle in degrees (-28.6 to 60)
+            right: Right gripper angle in degrees (-28.6 to 60)
             
         Returns:
             bool: True if command sent successfully
         """
-        return self.set_servo_angles({
-            'left_gripper_finger1_joint': left,
-            'right_gripper_finger1_joint': right,
-        })
+        try:
+            # Validate angles
+            left = self._validate_angle('left_gripper', left)
+            right = self._validate_angle('right_gripper', right)
+            
+            # Convert to radians
+            left_rad = math.radians(left)
+            right_rad = math.radians(right)
+            
+            # Publish to both grippers
+            left_msg = {'data': [left_rad]}
+            right_msg = {'data': [right_rad]}
+            
+            self.left_gripper_pub.publish(left_msg)
+            self.right_gripper_pub.publish(right_msg)
+            
+            # Update internal state
+            self.current_angles['left_gripper'] = left
+            self.current_angles['right_gripper'] = right
+            
+            return True
+            
+        except Exception as e:
+            raise BonicBotError(f"Failed to set grippers: {str(e)}")
     
     def open_grippers(self):
         """
@@ -243,7 +264,65 @@ class ServoController:
         Returns:
             bool: True if command sent successfully
         """
-        return self.set_grippers(-45.0, -45.0)
+        return self.set_grippers(0.0, 0.0)
+    
+    def set_left_gripper(self, angle):
+        """
+        Control left gripper only
+        
+        Args:
+            angle: Left gripper angle in degrees (-45 to 60)
+            
+        Returns:
+            bool: True if command sent successfully
+        """
+        try:
+            # Validate angle
+            angle = self._validate_angle('left_gripper', angle)
+            
+            # Convert to radians
+            angle_rad = math.radians(angle)
+            
+            # Publish to left gripper
+            msg = {'data': [angle_rad]}
+            self.left_gripper_pub.publish(msg)
+            
+            # Update internal state
+            self.current_angles['left_gripper'] = angle
+            
+            return True
+            
+        except Exception as e:
+            raise BonicBotError(f"Failed to set left gripper: {str(e)}")
+    
+    def set_right_gripper(self, angle):
+        """
+        Control right gripper only
+        
+        Args:
+            angle: Right gripper angle in degrees (-45 to 60)
+            
+        Returns:
+            bool: True if command sent successfully
+        """
+        try:
+            # Validate angle
+            angle = self._validate_angle('right_gripper', angle)
+            
+            # Convert to radians
+            angle_rad = math.radians(angle)
+            
+            # Publish to right gripper
+            msg = {'data': [angle_rad]}
+            self.right_gripper_pub.publish(msg)
+            
+            # Update internal state
+            self.current_angles['right_gripper'] = angle
+            
+            return True
+            
+        except Exception as e:
+            raise BonicBotError(f"Failed to set right gripper: {str(e)}")
     
     def set_neck(self, yaw):
         """
@@ -255,7 +334,24 @@ class ServoController:
         Returns:
             bool: True if command sent successfully
         """
-        return self.set_single_servo('neck_yaw_joint', yaw)
+        try:
+            # Validate angle
+            yaw = self._validate_angle('neck_yaw', yaw)
+            
+            # Convert to radians
+            yaw_rad = math.radians(yaw)
+            
+            # Publish command [yaw]
+            msg = {'data': [yaw_rad]}
+            self.head_pub.publish(msg)
+            
+            # Update internal state
+            self.current_angles['neck_yaw'] = yaw
+            
+            return True
+            
+        except Exception as e:
+            raise BonicBotError(f"Failed to set neck: {str(e)}")
     
     def look_left(self):
         """
@@ -291,72 +387,89 @@ class ServoController:
         Returns:
             bool: True if command sent successfully
         """
-        neutral_angles = {joint: 0.0 for joint in SERVO_JOINTS}
-        return self.set_servo_angles(neutral_angles)
-    
-    def wave_left_arm(self, duration=2.0):
-        """
-        Wave the left arm (demo motion)
-        
-        Args:
-            duration: Duration of wave in seconds
-            
-        Returns:
-            bool: True if motion completed
-        """
-        import time
-        
-        # Wave motion
-        self.move_left_arm(90, 30)
-        time.sleep(duration / 4)
-        self.move_left_arm(45, 10)
-        time.sleep(duration / 4)
-        self.move_left_arm(90, 30)
-        time.sleep(duration / 4)
-        self.move_left_arm(0, 0)
-        time.sleep(duration / 4)
-        
+        self.move_left_arm(0.0, 0.0)
+        self.move_right_arm(0.0, 0.0)
+        self.set_grippers(0.0, 0.0)
+        self.set_neck(0.0)
         return True
     
-    def wave_right_arm(self, duration=2.0):
+    def get_servo_angles(self):
         """
-        Wave the right arm (demo motion)
+        Get current servo angles
         
-        Args:
-            duration: Duration of wave in seconds
-            
         Returns:
-            bool: True if motion completed
+            dict: Current angles in degrees for all servos
         """
-        import time
-        
-        # Wave motion
-        self.move_right_arm(90, 30)
-        time.sleep(duration / 4)
-        self.move_right_arm(45, 10)
-        time.sleep(duration / 4)
-        self.move_right_arm(90, 30)
-        time.sleep(duration / 4)
-        self.move_right_arm(0, 0)
-        time.sleep(duration / 4)
-        
-        return True
+        return dict(self.current_angles)
     
-    def get_servo_limits(self, joint_name=None):
+    def get_servo_limits(self):
         """
         Get servo angle limits
         
-        Args:
-            joint_name: Optional joint name. If None, returns all limits.
-            
         Returns:
-            dict or tuple: If joint_name is None, returns dict of all limits.
-                          Otherwise returns (min, max) tuple for specified joint.
+            dict: Dictionary of (min, max) tuples for each joint
         """
-        if joint_name is None:
-            return dict(SERVO_JOINTS)
+        return dict(SERVO_LIMITS)
+    
+    # Legacy compatibility methods (deprecated - kept for backward compatibility)
+    def set_servo_angles(self, angles):
+        """
+        Legacy method - now maps to individual controller calls
         
-        if joint_name not in SERVO_JOINTS:
+        Deprecated: Use move_left_arm(), move_right_arm(), set_grippers(), set_neck() instead
+        """
+        result = True
+        
+        # Map old joint names to new methods
+        if 'left_shoulder_pitch_joint' in angles or 'left_elbow_joint' in angles:
+            shoulder = angles.get('left_shoulder_pitch_joint', self.current_angles['left_shoulder'])
+            elbow = angles.get('left_elbow_joint', self.current_angles['left_elbow'])
+            result = result and self.move_left_arm(shoulder, elbow)
+        
+        if 'right_shoulder_pitch_joint' in angles or 'right_elbow_joint' in angles:
+            shoulder = angles.get('right_shoulder_pitch_joint', self.current_angles['right_shoulder'])
+            elbow = angles.get('right_elbow_joint', self.current_angles['right_elbow'])
+            result = result and self.move_right_arm(shoulder, elbow)
+        
+        if 'left_gripper_finger1_joint' in angles or 'right_gripper_finger1_joint' in angles:
+            left = angles.get('left_gripper_finger1_joint', self.current_angles['left_gripper'])
+            right = angles.get('right_gripper_finger1_joint', self.current_angles['right_gripper'])
+            result = result and self.set_grippers(left, right)
+        
+        if 'neck_yaw_joint' in angles:
+            result = result and self.set_neck(angles['neck_yaw_joint'])
+        
+        return result
+    
+    def set_single_servo(self, joint_name, angle):
+        """
+        Legacy method - maps old joint names to new controller calls
+        
+        Deprecated: Use move_left_arm(), move_right_arm(), set_grippers(), set_neck() instead
+        """
+        return self.set_servo_angles({joint_name: angle})
+    
+    def get_single_servo(self, joint_name):
+        """
+        Get a single servo's current angle (legacy compatibility)
+        
+        Args:
+            joint_name: Old-style joint name or new simplified name
+        """
+        # Map old names to new names
+        name_map = {
+            'left_shoulder_pitch_joint': 'left_shoulder',
+            'left_elbow_joint': 'left_elbow',
+            'right_shoulder_pitch_joint': 'right_shoulder',
+            'right_elbow_joint': 'right_elbow',
+            'left_gripper_finger1_joint': 'left_gripper',
+            'right_gripper_finger1_joint': 'right_gripper',
+            'neck_yaw_joint': 'neck_yaw',
+        }
+        
+        simplified_name = name_map.get(joint_name, joint_name)
+        
+        if simplified_name not in self.current_angles:
             raise BonicBotError(f"Unknown servo joint: {joint_name}")
         
-        return SERVO_JOINTS[joint_name]
+        return self.current_angles[simplified_name]
