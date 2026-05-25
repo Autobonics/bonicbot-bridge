@@ -228,6 +228,14 @@ class BonicBot:
         """Move right arm (shoulder, elbow angles in degrees)"""
         return self.servo.move_right_arm(shoulder, elbow)
     
+    def wave_left_arm(self, duration=2.0):
+        """Wave left arm"""
+        return self.servo.wave_left_arm(duration)
+
+    def wave_right_arm(self, duration=2.0):
+        """Wave right arm"""
+        return self.servo.wave_right_arm(duration)
+    
     def set_grippers(self, left, right):
         """Set gripper angles in degrees"""
         return self.servo.set_grippers(left, right)

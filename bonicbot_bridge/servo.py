@@ -2,7 +2,7 @@
 Servo controller for robot arm, gripper, and neck control
 Updated for separate controller groups
 """
-
+import time
 import math
 from roslibpy import Topic
 from .exceptions import BonicBotError
@@ -170,6 +170,9 @@ class ServoController:
             msg = {'data': [shoulder_rad, elbow_rad]}
             self.left_arm_pub.publish(msg)
             
+            # Small delay to ensure message is transmitted
+            time.sleep(0.1)
+            
             # Update internal state
             self.current_angles['left_shoulder'] = shoulder
             self.current_angles['left_elbow'] = elbow
@@ -203,6 +206,10 @@ class ServoController:
             msg = {'data': [shoulder_rad, elbow_rad]}
             self.right_arm_pub.publish(msg)
             
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
+            
             # Update internal state
             self.current_angles['right_shoulder'] = shoulder
             self.current_angles['right_elbow'] = elbow
@@ -211,6 +218,68 @@ class ServoController:
             
         except Exception as e:
             raise BonicBotError(f"Failed to move right arm: {str(e)}")
+    def wave_left_arm(self, duration=2.0):
+        """
+        Wave the left arm.
+
+        Args:
+            duration: Total duration of the wave motion in seconds
+
+        Returns:
+            bool: True if completed successfully
+        """
+
+        # Move arm to starting position
+        self.move_left_arm(90.0, 40.0)
+        time.sleep(0.5)
+
+        # Calculate how many waves we can do in the duration
+        wave_time = 1.0
+        remaining = duration - 0.5
+        waves = max(1, int(remaining / wave_time))
+
+        for _ in range(waves):
+            self.move_left_arm(90.0, 10.0)
+            time.sleep(0.5)
+
+            self.move_left_arm(90.0, 40.0)
+            time.sleep(0.5)
+
+        # Reset to neutral
+        self.move_left_arm(0.0, 0.0)
+        return True
+
+
+    def wave_right_arm(self, duration=2.0):
+        """
+        Wave the right arm.
+
+        Args:
+            duration: Total duration of the wave motion in seconds
+
+        Returns:
+            bool: True if completed successfully
+        """
+
+        # Move arm to starting position
+        self.move_right_arm(90.0, 40.0)
+        time.sleep(0.5)
+
+        # Calculate how many waves we can do in the duration
+        wave_time = 1.0
+        remaining = duration - 0.5
+        waves = max(1, int(remaining / wave_time))
+
+        for _ in range(waves):
+            self.move_right_arm(90.0, 10.0)
+            time.sleep(0.5)
+
+            self.move_right_arm(90.0, 40.0)
+            time.sleep(0.5)
+
+        # Reset to neutral
+        self.move_right_arm(0.0, 0.0)
+        return True
     
     def set_grippers(self, left, right):
         """
@@ -238,6 +307,10 @@ class ServoController:
             
             self.left_gripper_pub.publish(left_msg)
             self.right_gripper_pub.publish(right_msg)
+            
+            # Small delay to ensure messages are transmitted
+            import time
+            time.sleep(0.1)
             
             # Update internal state
             self.current_angles['left_gripper'] = left
@@ -287,6 +360,10 @@ class ServoController:
             msg = {'data': [angle_rad]}
             self.left_gripper_pub.publish(msg)
             
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
+            
             # Update internal state
             self.current_angles['left_gripper'] = angle
             
@@ -316,6 +393,10 @@ class ServoController:
             msg = {'data': [angle_rad]}
             self.right_gripper_pub.publish(msg)
             
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
+            
             # Update internal state
             self.current_angles['right_gripper'] = angle
             
@@ -344,6 +425,10 @@ class ServoController:
             # Publish command [yaw]
             msg = {'data': [yaw_rad]}
             self.head_pub.publish(msg)
+            
+            # Small delay to ensure message is transmitted
+            import time
+            time.sleep(0.1)
             
             # Update internal state
             self.current_angles['neck_yaw'] = yaw
@@ -397,10 +482,17 @@ class ServoController:
         """
         Get current servo angles
         
+        Note: Includes small delay to ensure joint state feedback has updated
+        
         Returns:
-            dict: Current angles in degrees for all servos
+            dict: Current angles in degrees for all servos (rounded to 2 decimal places)
         """
-        return dict(self.current_angles)
+        # Wait for joint state feedback to update
+        import time
+        time.sleep(0.5)
+        
+        # Round all values to 2 decimal places for cleaner output
+        return {joint: round(angle, 2) for joint, angle in self.current_angles.items()}
     
     def get_servo_limits(self):
         """
