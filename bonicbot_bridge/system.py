@@ -99,21 +99,16 @@ class SystemController:
         except Exception as e:
             raise BonicSystemError(f"Mapping stop failed: {str(e)}")
     
-    def save_map(self, name=None):
+    def save_map(self):
         """
         Save the current map.
-        
-        Args:
-            name (str, optional): Custom filename for the map. If None, the map name is determined automatically by the backend system.
+        Note: The map name is determined automatically by the backend system.
         
         Returns:
             bool: True if map saved successfully
         """
         try:
-            req_data = {}
-            if name is not None:
-                req_data['name'] = name
-            request = ServiceRequest(req_data)
+            request = ServiceRequest()
             response = self.save_map_srv.call(request, timeout=30)
             
             if not response['success']:
