@@ -918,7 +918,11 @@ The library communicates with these ROS2 topics and services:
 - `/robot/nav_status` (std_msgs/String) - Navigation status updates
 - `/robot/distance_to_goal` (std_msgs/Float32) - Distance feedback
 - `/joint_states` (sensor_msgs/JointState) - Servo position feedback
-- `/servo_position_controller/commands` (std_msgs/Float64MultiArray) - Servo commands
+- `/left_arm_controller/commands` (std_msgs/Float64MultiArray) - Left arm commands
+- `/right_arm_controller/commands` (std_msgs/Float64MultiArray) - Right arm commands
+- `/head_controller/commands` (std_msgs/Float64MultiArray) - Head/neck commands
+- `/left_gripper_controller/commands` (std_msgs/Float64MultiArray) - Left gripper commands
+- `/right_gripper_controller/commands` (std_msgs/Float64MultiArray) - Right gripper commands
 - `/camera/image_raw/compressed` (sensor_msgs/CompressedImage) - Camera images
 - `/camera/camera_info` (sensor_msgs/CameraInfo) - Camera metadata
 - `/robot/camera_active` (std_msgs/Bool) - Camera status
