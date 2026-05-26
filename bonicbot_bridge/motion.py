@@ -173,6 +173,9 @@ class MotionController(QueueMixin):
             speed: Forward speed in m/s (default: 0.3)
             duration: Time to move in seconds (None for continuous)
         """
+        if duration is not None and duration < 0:
+            raise ValueError("Duration cannot be negative")
+            
         if duration:
             # Continuously publish commands to avoid cmd_vel_timeout
             publish_rate = 10  # 10 Hz
@@ -190,6 +193,9 @@ class MotionController(QueueMixin):
     
     def move_backward(self, speed=0.3, duration=None):
         """Move robot backward"""
+        if duration is not None and duration < 0:
+            raise ValueError("Duration cannot be negative")
+            
         if duration:
             # Continuously publish commands to avoid cmd_vel_timeout
             publish_rate = 10  # 10 Hz
@@ -244,6 +250,9 @@ class MotionController(QueueMixin):
             >>> bot.turn_left(speed=30, duration=3)  # Legacy open-loop mode
             >>> bot.turn_left(speed=30)              # Continuous spin
         """
+        if duration is not None and duration < 0:
+            raise ValueError("Duration cannot be negative")
+            
         if angle is not None:
             return self._turn_by_angle(angle_deg=abs(angle), speed_deg=abs(speed))
         elif duration:
@@ -280,6 +289,9 @@ class MotionController(QueueMixin):
             >>> bot.turn_right(speed=30, duration=3)  # Legacy open-loop mode
             >>> bot.turn_right(speed=30)              # Continuous spin
         """
+        if duration is not None and duration < 0:
+            raise ValueError("Duration cannot be negative")
+            
         if angle is not None:
             return self._turn_by_angle(angle_deg=-abs(angle), speed_deg=abs(speed))
         elif duration:
