@@ -65,6 +65,11 @@ class MotionController(QueueMixin):
         self.nav_status_sub.subscribe(self._nav_status_callback)
         self.distance_sub.subscribe(self._distance_callback)
         
+        # Navigation active tracking
+        self.nav_active_sub = Topic(self.ros, '/robot/navigation_active', 'std_msgs/Bool')
+        self.navigation_active = False
+        self.nav_active_sub.subscribe(self._nav_active_callback)
+        
     def _odom_callback(self, msg):
         """Extract yaw from odometry quaternion for closed-loop turns."""
         q = msg['pose']['pose']['orientation']
@@ -79,6 +84,10 @@ class MotionController(QueueMixin):
     def _distance_callback(self, msg):
         """Update distance to goal"""
         self.distance_to_goal = msg['data']
+        
+    def _nav_active_callback(self, msg):
+        """Update navigation active status"""
+        self.navigation_active = msg['data']
     
     @staticmethod
     def _normalize_angle(angle):
@@ -421,6 +430,9 @@ class MotionController(QueueMixin):
         Returns:
             bool: True if goal was sent successfully
         """
+        if not self.navigation_active:
+            raise NavigationError("Cannot set goal: Navigation system is not active. Call start_navigation() first.")
+            
         try:
             # Convert degrees to radians for ROS message
             theta_rad = math.radians(theta)
@@ -599,7 +611,7 @@ class MotionController(QueueMixin):
             except Exception:
                 pass
                 
-        for sub in (self._odom_sub, self.nav_status_sub, self.distance_sub):
+        for sub in (self._odom_sub, self.nav_status_sub, self.distance_sub, self.nav_active_sub):
             try:
                 sub.unsubscribe()
             except Exception:
