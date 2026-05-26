@@ -34,6 +34,7 @@ class CameraManager:
         # Camera topics
         self.image_sub = None
         self.info_sub = Topic(self.ros, '/camera/camera_info', 'sensor_msgs/CameraInfo')
+        self._camera_active_sub = Topic(self.ros, '/robot/camera_active', 'std_msgs/Bool')
         
         # Camera services
         self.start_camera_srv = Service(self.ros, '/robot/start_camera', 'std_srvs/Trigger')
@@ -44,9 +45,11 @@ class CameraManager:
         self.camera_info = None
         self.is_streaming_active = False
         self.user_callback = None
+        self._camera_hw_active = False
         
-        # Subscribe to camera info
+        # Subscribe to camera info and hardware status
         self.info_sub.subscribe(self._camera_info_callback)
+        self._camera_active_sub.subscribe(self._camera_active_callback)
         
         # Wait for camera info
         time.sleep(0.3)
@@ -58,6 +61,10 @@ class CameraManager:
             'height': msg['height'],
             'distortion_model': msg.get('distortion_model', 'plumb_bob'),
         }
+    
+    def _camera_active_callback(self, msg):
+        """Update camera hardware active state"""
+        self._camera_hw_active = msg['data']
     
     def _image_callback(self, msg):
         """
@@ -128,7 +135,17 @@ class CameraManager:
                 "  pip install Pillow"
             )
         
+        # Validate that the camera hardware is actually active before subscribing
+        if not self._camera_hw_active:
+            raise BonicBotError(
+                "Cannot start streaming: Camera hardware is not active. "
+                "Call system.start_camera() first to activate the camera hardware."
+            )
+        
         try:
+            # Clear any stale image from a previous session
+            self.latest_image = None
+            
             # Store user callback
             self.user_callback = callback
             
@@ -163,6 +180,7 @@ class CameraManager:
             
             self.is_streaming_active = False
             self.user_callback = None
+            self.latest_image = None
             print("🛑 Camera streaming stopped")
             return True
             
