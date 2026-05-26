@@ -98,7 +98,7 @@ Low-level velocity control for custom robot movement patterns. This method gives
 **Parameters:**
 - `linear_x` (float): Forward/backward velocity in m/s
 - `linear_y` (float): Left/right velocity in m/s (for omnidirectional robots)
-- `angular_z` (float): Rotational velocity in deg/s
+- `angular_z` (float): Rotational velocity in **deg/s** (converted internally to rad/s for ROS)
 
 **⚠️ Important**: Due to ROS2's `cmd_vel_timeout` (typically 0.5s), commands must be **continuously published** to maintain movement. For duration-based control, publish in a loop at 10Hz.
 
@@ -111,7 +111,7 @@ bot.motion.move(linear_x=0.3)
 bot.stop()  # Stop when done
 
 # Pure rotation (spin in place)
-bot.motion.move(angular_z=30.0)  # 30 deg/s
+bot.motion.move(angular_z=30.0)  # 30 deg/s counter-clockwise
 # ... robot spins
 bot.stop()
 ```
@@ -137,7 +137,7 @@ bot.stop()
 # Circular arc (forward + rotation)
 start = time.time()
 while (time.time() - start) < 5.0:
-    bot.motion.move(linear_x=0.2, angular_z=20.0)  # Drive in circle
+    bot.motion.move(linear_x=0.2, angular_z=20.0)  # Drive in circle (20 deg/s)
     time.sleep(0.1)
 bot.stop()
 
@@ -145,13 +145,13 @@ bot.stop()
 # Left arc
 start = time.time()
 while (time.time() - start) < 2.5:
-    bot.motion.move(linear_x=0.2, angular_z=30.0)
+    bot.motion.move(linear_x=0.2, angular_z=30.0)   # 30 deg/s left
     time.sleep(0.1)
 
 # Right arc
 start = time.time()
 while (time.time() - start) < 2.5:
-    bot.motion.move(linear_x=0.2, angular_z=-30.0)
+    bot.motion.move(linear_x=0.2, angular_z=-30.0)  # 30 deg/s right
     time.sleep(0.1)
 
 bot.stop()
@@ -180,16 +180,24 @@ bot.move_backward(0.2, 1.5)     # Move backward for 1.5 seconds
 
 Turn robot left (counter-clockwise).
 
+`speed` is in **degrees/second (deg/s)**. The `move()` method converts this to rad/s before publishing to ROS. Rotation achieved ≈ `speed × duration` degrees.
+
 ```python
-bot.turn_left(0.5, 1.0)         # Turn left for 1 second
+bot.turn_left(30.0, 3.0)        # Turn left ~90° (30 deg/s × 3s)
+bot.turn_left(57.0, 1.6)        # Turn left ~90° (57 deg/s × 1.6s)
+bot.turn_left(30.0)             # Spin left continuously at 30 deg/s
 ```
 
 #### `turn_right(speed, duration=None)`
 
 Turn robot right (clockwise).
 
+`speed` is in **degrees/second (deg/s)**. The `move()` method converts this to rad/s before publishing to ROS. Rotation achieved ≈ `speed × duration` degrees.
+
 ```python
-bot.turn_right(0.5, 1.0)        # Turn right for 1 second
+bot.turn_right(30.0, 3.0)       # Turn right ~90° (30 deg/s × 3s)
+bot.turn_right(57.0, 1.6)       # Turn right ~90° (57 deg/s × 1.6s)
+bot.turn_right(30.0)            # Spin right continuously at 30 deg/s
 ```
 
 #### `stop()`
@@ -704,9 +712,9 @@ with BonicBot() as bot:
     print("Drawing a square...")
 
     for i in range(4):
-        bot.move_forward(0.3, duration=2)   # Move forward
-        bot.turn_left(0.5, duration=1.6)    # Turn 90 degrees
-        time.sleep(0.5)                     # Pause between moves
+        bot.move_forward(0.3, duration=2)   # Move forward 0.6 m
+        bot.turn_left(57.0, duration=1.6)   # Turn ~90° (57 deg/s × 1.6s)
+        time.sleep(0.5)                      # Pause between moves
 
     print("Square complete!")
 ```
@@ -792,9 +800,9 @@ with BonicBot() as bot:
         if move_type == 'forward':
             bot.move_forward(0.3, duration)
         elif move_type == 'left':
-            bot.turn_left(0.5, duration)
+            bot.turn_left(57.0, duration)
         elif move_type == 'right':
-            bot.turn_right(0.5, duration)
+            bot.turn_right(57.0, duration)
 
         time.sleep(1)  # Pause between moves
 

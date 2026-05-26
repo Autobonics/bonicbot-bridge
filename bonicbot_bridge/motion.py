@@ -42,12 +42,27 @@ class MotionController:
     
     def move(self, linear_x=0, linear_y=0, angular_z=0):
         """
-        Send velocity command to robot
-        
+        Send velocity command to robot.
+
         Args:
-            linear_x: Forward/backward velocity (m/s)
-            linear_y: Left/right velocity (m/s) - for omnidirectional robots
-            angular_z: Rotational velocity (deg/s)
+            linear_x (float): Forward/backward velocity in m/s.
+                              Positive = forward, negative = backward.
+            linear_y (float): Left/right strafe velocity in m/s.
+                              Only effective on omnidirectional robots.
+            angular_z (float): Rotational velocity in **degrees/second** (deg/s).
+                               Positive = counter-clockwise (left), negative = clockwise (right).
+                               This value is converted to rad/s internally before being sent
+                               to the ROS cmd_vel topic.
+
+        Note:
+            Due to ROS2's cmd_vel_timeout (~0.5s), a single call only moves the robot
+            briefly. For sustained movement, publish in a 10 Hz loop or use the
+            higher-level convenience methods (move_forward, turn_left, etc.).
+
+        Examples:
+            >>> bot.motion.move(linear_x=0.3)          # Forward at 0.3 m/s
+            >>> bot.motion.move(angular_z=30.0)        # Spin left at 30 deg/s
+            >>> bot.motion.move(linear_x=0.2, angular_z=-20.0)  # Arc right
         """
         # Convert angular velocity from deg/s to rad/s for ROS
         angular_z_rad = math.radians(angular_z)
@@ -98,8 +113,28 @@ class MotionController:
             # Continuous movement (single command)
             self.move(linear_x=-speed)
             
-    def turn_left(self, speed=0.5, duration=None):
-        """Turn robot left (counter-clockwise)"""
+    def turn_left(self, speed=30.0, duration=None):
+        """
+        Turn robot left (counter-clockwise).
+
+        Args:
+            speed (float): Rotational speed in **degrees/second** (deg/s).
+                           Default is 30 deg/s. Use higher values (e.g. 57 deg/s)
+                           for faster turns. This is passed to move() which converts
+                           it to rad/s internally.
+
+                           Rotation estimate: degrees_turned ≈ speed × duration
+                           Example: speed=57, duration=1.6 → ~90° turn
+
+            duration (float | None): How long to turn in seconds.
+                                     If None, sends a single command (continuous until
+                                     stopped or cmd_vel_timeout occurs).
+
+        Examples:
+            >>> bot.turn_left(30.0, 3.0)   # Turn left ~90° (30 deg/s × 3s)
+            >>> bot.turn_left(57.0, 1.6)   # Turn left ~90° (57 deg/s × 1.6s)
+            >>> bot.turn_left(30.0)        # Spin left continuously at 30 deg/s
+        """
         if duration:
             # Continuously publish commands to avoid cmd_vel_timeout
             publish_rate = 10  # 10 Hz
@@ -115,8 +150,28 @@ class MotionController:
             # Continuous movement (single command)
             self.move(angular_z=speed)
             
-    def turn_right(self, speed=0.5, duration=None):
-        """Turn robot right (clockwise)"""
+    def turn_right(self, speed=30.0, duration=None):
+        """
+        Turn robot right (clockwise).
+
+        Args:
+            speed (float): Rotational speed in **degrees/second** (deg/s).
+                           Default is 30 deg/s. Use higher values (e.g. 57 deg/s)
+                           for faster turns. This is passed to move() which converts
+                           it to rad/s internally.
+
+                           Rotation estimate: degrees_turned ≈ speed × duration
+                           Example: speed=57, duration=1.6 → ~90° turn
+
+            duration (float | None): How long to turn in seconds.
+                                     If None, sends a single command (continuous until
+                                     stopped or cmd_vel_timeout occurs).
+
+        Examples:
+            >>> bot.turn_right(30.0, 3.0)  # Turn right ~90° (30 deg/s × 3s)
+            >>> bot.turn_right(57.0, 1.6)  # Turn right ~90° (57 deg/s × 1.6s)
+            >>> bot.turn_right(30.0)       # Spin right continuously at 30 deg/s
+        """
         if duration:
             # Continuously publish commands to avoid cmd_vel_timeout
             publish_rate = 10  # 10 Hz
