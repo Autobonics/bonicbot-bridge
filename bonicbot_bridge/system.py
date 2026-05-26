@@ -273,12 +273,16 @@ class SystemController:
         
         success = True
         
-        # Start mapping first
-        if not self.start_mapping():
+        # Start mapping first (skip if already active)
+        if self.mapping_active:
+            print("ℹ️ Mapping is already active, skipping start_mapping")
+        elif not self.start_mapping():
             success = False
         
-        # Then start navigation (will work with online SLAM)
-        if success and not self.start_navigation():
+        # Then start navigation (skip if already active)
+        if self.navigation_active:
+            print("ℹ️ Navigation is already active, skipping start_navigation")
+        elif success and not self.start_navigation():
             success = False
             
         if success:
