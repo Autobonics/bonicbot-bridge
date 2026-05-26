@@ -76,8 +76,13 @@ class BonicBot:
         """Disconnect from robot"""
         self.connected = False  # Set first to prevent reconnect handler
         if self.ros and self.ros.is_connected:
-            self.motion.stop()  # Safety stop
-            self.ros.terminate()
+            try:
+                self.motion.stop()  # Safety stop
+            except Exception:
+                pass
+            self.ros.close()
+            # Give websocket time to close cleanly
+            time.sleep(0.5)
             print("🔌 Disconnected from BonicBot")
     
     def _on_connection_lost(self):
