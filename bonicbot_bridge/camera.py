@@ -272,11 +272,18 @@ class CameraManager:
     
     def stop_camera_service(self):
         """
-        Stop camera via ROS service
+        Stop camera via ROS service.
+
+        This method is idempotent — calling it when the camera hardware
+        is already inactive is a safe no-op.
         
         Returns:
-            bool: True if camera service stopped successfully
+            bool: True if camera service stopped (or was already stopped)
         """
+        if not self._camera_hw_active:
+            print("ℹ️ Camera hardware is already inactive, nothing to stop")
+            return True
+
         try:
             request = ServiceRequest()
             response = self.stop_camera_srv.call(request)

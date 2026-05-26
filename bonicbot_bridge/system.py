@@ -204,11 +204,18 @@ class SystemController:
     
     def stop_camera(self):
         """
-        Stop camera system
+        Stop camera system.
+
+        This method is idempotent — calling it when the camera is
+        already inactive is a safe no-op.
         
         Returns:
-            bool: True if camera stopped successfully
+            bool: True if camera stopped (or was already stopped)
         """
+        if not self.camera_active:
+            print("ℹ️ Camera is already inactive, nothing to stop")
+            return True
+
         try:
             request = ServiceRequest()
             response = self.stop_camera_srv.call(request)
