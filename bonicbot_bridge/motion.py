@@ -5,6 +5,7 @@ Motion controller for robot movement and navigation
 import time
 import math
 import threading
+import functools
 from roslibpy import Topic, Service, ServiceRequest
 from .exceptions import NavigationError
 from .precisemotion import QueueMixin
@@ -15,6 +16,14 @@ from .precisemotion import QueueMixin
 MAX_LINEAR_SPEED = 1.0       # m/s  (absolute value, applies to linear_x & linear_y)
 MAX_ANGULAR_SPEED = 180.0    # deg/s (absolute value, applied before rad/s conversion)
 
+def _with_motion_lock(func):
+    """Decorator to ensure motion commands are thread-safe and don't interleave."""
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        with self._motion_lock:
+            return func(self, *args, **kwargs)
+    return wrapper
+
 class MotionController(QueueMixin):
     def __init__(self, ros_client):
         self.ros = ros_client
@@ -22,6 +31,9 @@ class MotionController(QueueMixin):
         # Velocity limits (instance-level so they can be tuned per robot)
         self._max_linear_speed = MAX_LINEAR_SPEED
         self._max_angular_speed = MAX_ANGULAR_SPEED
+        
+        # Thread safety lock for motion commands
+        self._motion_lock = threading.RLock()
         
         # Movement publisher
         self.cmd_vel_pub = Topic(self.ros, '/cmd_vel', 'geometry_msgs/Twist')
@@ -87,6 +99,7 @@ class MotionController(QueueMixin):
             time.sleep(0.05)
         return None
     
+    @_with_motion_lock
     def _turn_by_angle(self, angle_deg, speed_deg, timeout=30.0):
         """
         Closed-loop turn using odometry feedback.
@@ -203,6 +216,7 @@ class MotionController(QueueMixin):
             return clamped
         return value
 
+    @_with_motion_lock
     def move(self, linear_x=0, linear_y=0, angular_z=0):
         """
         Send velocity command to robot.
@@ -251,6 +265,7 @@ class MotionController(QueueMixin):
         }
         self.cmd_vel_pub.publish(msg)
     
+    @_with_motion_lock
     def move_forward(self, speed=0.3, duration=None):
         """
         Move robot forward
@@ -277,6 +292,7 @@ class MotionController(QueueMixin):
             # Continuous movement (single command)
             self.move(linear_x=speed)
     
+    @_with_motion_lock
     def move_backward(self, speed=0.3, duration=None):
         """Move robot backward"""
         if duration is not None and duration < 0:
@@ -297,6 +313,7 @@ class MotionController(QueueMixin):
             # Continuous movement (single command)
             self.move(linear_x=-speed)
             
+    @_with_motion_lock
     def _open_loop_turn(self, omega_rad, duration):
         """Fallback open-loop timed turn (used when odometry is unavailable)."""
         publish_rate = 20  # Hz
@@ -307,6 +324,7 @@ class MotionController(QueueMixin):
             time.sleep(interval)
         self.stop()
 
+    @_with_motion_lock
     def turn_left(self, speed=30.0, angle=None, duration=None):
         """
         Turn robot left (counter-clockwise).
@@ -346,6 +364,7 @@ class MotionController(QueueMixin):
         else:
             self.move(angular_z=speed)
             
+    @_with_motion_lock
     def turn_right(self, speed=30.0, angle=None, duration=None):
         """
         Turn robot right (clockwise).
@@ -385,6 +404,7 @@ class MotionController(QueueMixin):
         else:
             self.move(angular_z=-speed)
     
+    @_with_motion_lock
     def stop(self):
         """Stop all robot movement"""
         self.move(0, 0, 0)
