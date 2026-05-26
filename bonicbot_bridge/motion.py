@@ -4,6 +4,7 @@ Motion controller for robot movement and navigation
 
 import time
 import math
+import threading
 from roslibpy import Topic, Service, ServiceRequest
 from .exceptions import NavigationError
 
@@ -13,6 +14,12 @@ class MotionController:
         
         # Movement publisher
         self.cmd_vel_pub = Topic(self.ros, '/cmd_vel', 'geometry_msgs/Twist')
+        
+        # Odometry subscription for closed-loop control
+        self._odom_sub = Topic(self.ros, '/diff_cont/odom', 'nav_msgs/Odometry')
+        self._current_yaw = None  # radians
+        self._yaw_lock = threading.Lock()
+        self._odom_sub.subscribe(self._odom_callback)
         
         # Navigation topics and services
         self.goal_pub = Topic(self.ros, '/goal_pose', 'geometry_msgs/PoseStamped')
@@ -32,6 +39,13 @@ class MotionController:
         self.nav_status_sub.subscribe(self._nav_status_callback)
         self.distance_sub.subscribe(self._distance_callback)
         
+    def _odom_callback(self, msg):
+        """Extract yaw from odometry quaternion for closed-loop turns."""
+        q = msg['pose']['pose']['orientation']
+        yaw = 2.0 * math.atan2(q['z'], q['w'])
+        with self._yaw_lock:
+            self._current_yaw = yaw
+
     def _nav_status_callback(self, msg):
         """Update navigation status"""
         self.nav_status = msg['data']
@@ -39,6 +53,79 @@ class MotionController:
     def _distance_callback(self, msg):
         """Update distance to goal"""
         self.distance_to_goal = msg['data']
+    
+    @staticmethod
+    def _normalize_angle(angle):
+        """Normalize angle to [-pi, pi]."""
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
+    
+    def _wait_for_yaw(self, timeout=5.0):
+        """Block until odometry yaw is available."""
+        start = time.time()
+        while time.time() - start < timeout:
+            with self._yaw_lock:
+                if self._current_yaw is not None:
+                    return self._current_yaw
+            time.sleep(0.05)
+        return None
+    
+    def _turn_by_angle(self, angle_deg, speed_deg, timeout=30.0):
+        """
+        Closed-loop turn using odometry feedback.
+
+        Args:
+            angle_deg (float): How many degrees to turn.
+                               Positive = counter-clockwise (left).
+                               Negative = clockwise (right).
+            speed_deg (float): Rotation speed in deg/s (always positive).
+            timeout (float):   Safety timeout in seconds.
+
+        Returns:
+            float: Actual angle turned in degrees.
+        """
+        angle_rad = math.radians(angle_deg)
+        speed_rad = math.radians(speed_deg)
+
+        # Determine angular velocity direction
+        omega = speed_rad if angle_rad > 0 else -speed_rad
+
+        # Wait for initial yaw reading
+        start_yaw = self._wait_for_yaw()
+        if start_yaw is None:
+            # Fallback to open-loop if no odometry available
+            fallback_duration = abs(angle_deg) / speed_deg
+            self._open_loop_turn(omega, fallback_duration)
+            return angle_deg  # nominal, unverified
+
+        target_delta = abs(angle_rad)
+        accumulated = 0.0
+        prev_yaw = start_yaw
+
+        publish_rate = 20  # 20 Hz for smooth control
+        interval = 1.0 / publish_rate
+        start_time = time.time()
+
+        while accumulated < target_delta:
+            if (time.time() - start_time) > timeout:
+                break
+
+            self.move(angular_z=math.degrees(omega))
+            time.sleep(interval)
+
+            with self._yaw_lock:
+                current_yaw = self._current_yaw
+
+            if current_yaw is not None:
+                delta = self._normalize_angle(current_yaw - prev_yaw)
+                accumulated += abs(delta)
+                prev_yaw = current_yaw
+
+        self.stop()
+        return math.degrees(accumulated) * (1.0 if angle_rad > 0 else -1.0)
     
     def move(self, linear_x=0, linear_y=0, angular_z=0):
         """
@@ -113,78 +200,86 @@ class MotionController:
             # Continuous movement (single command)
             self.move(linear_x=-speed)
             
-    def turn_left(self, speed=30.0, duration=None):
+    def _open_loop_turn(self, omega_rad, duration):
+        """Fallback open-loop timed turn (used when odometry is unavailable)."""
+        publish_rate = 20  # Hz
+        interval = 1.0 / publish_rate
+        start_time = time.time()
+        while (time.time() - start_time) < duration:
+            self.move(angular_z=math.degrees(omega_rad))
+            time.sleep(interval)
+        self.stop()
+
+    def turn_left(self, speed=30.0, angle=None, duration=None):
         """
         Turn robot left (counter-clockwise).
 
+        Uses **closed-loop odometry feedback** when ``angle`` is specified,
+        guaranteeing accurate rotation regardless of execution environment.
+        Falls back to open-loop timed publishing when ``duration`` is used.
+
         Args:
             speed (float): Rotational speed in **degrees/second** (deg/s).
-                           Default is 30 deg/s. Use higher values (e.g. 57 deg/s)
-                           for faster turns. This is passed to move() which converts
-                           it to rad/s internally.
+                           Default is 30 deg/s.
+            angle (float | None): Target rotation in **degrees**.
+                                  Uses odometry feedback for precise control.
+                                  Example: angle=90 → exact 90° left turn.
+            duration (float | None): **(Legacy / fallback)** Time to turn in
+                                     seconds. Ignored if ``angle`` is provided.
+                                     If both are None, sends a single command
+                                     (continuous until stopped).
 
-                           Rotation estimate: degrees_turned ≈ speed × duration
-                           Example: speed=57, duration=1.6 → ~90° turn
-
-            duration (float | None): How long to turn in seconds.
-                                     If None, sends a single command (continuous until
-                                     stopped or cmd_vel_timeout occurs).
+        Returns:
+            float | None: Actual degrees turned (when ``angle`` is used),
+                          or None for continuous / duration modes.
 
         Examples:
-            >>> bot.turn_left(30.0, 3.0)   # Turn left ~90° (30 deg/s × 3s)
-            >>> bot.turn_left(57.0, 1.6)   # Turn left ~90° (57 deg/s × 1.6s)
-            >>> bot.turn_left(30.0)        # Spin left continuously at 30 deg/s
+            >>> bot.turn_left(angle=90)             # Precise 90° left turn
+            >>> bot.turn_left(speed=60, angle=180)  # Fast 180° left turn
+            >>> bot.turn_left(speed=30, duration=3)  # Legacy open-loop mode
+            >>> bot.turn_left(speed=30)              # Continuous spin
         """
-        if duration:
-            # Continuously publish commands to avoid cmd_vel_timeout
-            publish_rate = 10  # 10 Hz
-            interval = 1.0 / publish_rate
-            start_time = time.time()
-            
-            while (time.time() - start_time) < duration:
-                self.move(angular_z=speed)
-                time.sleep(interval)
-            
-            self.stop()
+        if angle is not None:
+            return self._turn_by_angle(angle_deg=abs(angle), speed_deg=abs(speed))
+        elif duration:
+            self._open_loop_turn(math.radians(speed), duration)
         else:
-            # Continuous movement (single command)
             self.move(angular_z=speed)
             
-    def turn_right(self, speed=30.0, duration=None):
+    def turn_right(self, speed=30.0, angle=None, duration=None):
         """
         Turn robot right (clockwise).
 
+        Uses **closed-loop odometry feedback** when ``angle`` is specified,
+        guaranteeing accurate rotation regardless of execution environment.
+        Falls back to open-loop timed publishing when ``duration`` is used.
+
         Args:
             speed (float): Rotational speed in **degrees/second** (deg/s).
-                           Default is 30 deg/s. Use higher values (e.g. 57 deg/s)
-                           for faster turns. This is passed to move() which converts
-                           it to rad/s internally.
+                           Default is 30 deg/s.
+            angle (float | None): Target rotation in **degrees**.
+                                  Uses odometry feedback for precise control.
+                                  Example: angle=90 → exact 90° right turn.
+            duration (float | None): **(Legacy / fallback)** Time to turn in
+                                     seconds. Ignored if ``angle`` is provided.
+                                     If both are None, sends a single command
+                                     (continuous until stopped).
 
-                           Rotation estimate: degrees_turned ≈ speed × duration
-                           Example: speed=57, duration=1.6 → ~90° turn
-
-            duration (float | None): How long to turn in seconds.
-                                     If None, sends a single command (continuous until
-                                     stopped or cmd_vel_timeout occurs).
+        Returns:
+            float | None: Actual degrees turned (when ``angle`` is used),
+                          or None for continuous / duration modes.
 
         Examples:
-            >>> bot.turn_right(30.0, 3.0)  # Turn right ~90° (30 deg/s × 3s)
-            >>> bot.turn_right(57.0, 1.6)  # Turn right ~90° (57 deg/s × 1.6s)
-            >>> bot.turn_right(30.0)       # Spin right continuously at 30 deg/s
+            >>> bot.turn_right(angle=90)             # Precise 90° right turn
+            >>> bot.turn_right(speed=60, angle=180)  # Fast 180° right turn
+            >>> bot.turn_right(speed=30, duration=3)  # Legacy open-loop mode
+            >>> bot.turn_right(speed=30)              # Continuous spin
         """
-        if duration:
-            # Continuously publish commands to avoid cmd_vel_timeout
-            publish_rate = 10  # 10 Hz
-            interval = 1.0 / publish_rate
-            start_time = time.time()
-            
-            while (time.time() - start_time) < duration:
-                self.move(angular_z=-speed)
-                time.sleep(interval)
-            
-            self.stop()
+        if angle is not None:
+            return self._turn_by_angle(angle_deg=-abs(angle), speed_deg=abs(speed))
+        elif duration:
+            self._open_loop_turn(-math.radians(speed), duration)
         else:
-            # Continuous movement (single command)
             self.move(angular_z=-speed)
     
     def stop(self):

@@ -89,13 +89,13 @@ class BonicBot:
         """Move robot backward"""
         return self.motion.move_backward(speed, duration)
         
-    def turn_left(self, speed=0.5, duration=None):
-        """Turn robot left"""
-        return self.motion.turn_left(speed, duration)
+    def turn_left(self, speed=30.0, angle=None, duration=None):
+        """Turn robot left (closed-loop when angle is specified)"""
+        return self.motion.turn_left(speed, angle=angle, duration=duration)
         
-    def turn_right(self, speed=0.5, duration=None):
-        """Turn robot right"""
-        return self.motion.turn_right(speed, duration)
+    def turn_right(self, speed=30.0, angle=None, duration=None):
+        """Turn robot right (closed-loop when angle is specified)"""
+        return self.motion.turn_right(speed, angle=angle, duration=duration)
     
     def stop(self):
         """Stop robot movement"""
