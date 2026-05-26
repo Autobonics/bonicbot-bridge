@@ -60,7 +60,7 @@ class BonicBot:
             self.camera = CameraManager(self.ros)
             self.servo = ServoController(self.ros)
             self.vision = VisionController(self.ros)
-            self.autonomous = ExploreController(self.ros, self.motion, self.sensors)
+            self.autonomous = ExploreController(self.ros)
             
             self.connected = True
             print(f"🤖 Connected to BonicBot at {self.host}:{self.port}")

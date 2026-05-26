@@ -17,3 +17,7 @@ class NavigationError(BonicBotError):
 class BonicSystemError(BonicBotError):
     """Raised when system operations (mapping, navigation) fail"""
     pass
+
+class PreciseMotionError(BonicBotError):
+    """Raised when precise motion operations fail"""
+    pass
