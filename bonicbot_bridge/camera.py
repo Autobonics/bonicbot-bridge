@@ -135,12 +135,20 @@ class CameraManager:
                 "  pip install Pillow"
             )
         
-        # Validate that the camera hardware is actually active before subscribing
+        # Auto-enable camera hardware if it is not active
         if not self._camera_hw_active:
-            raise BonicBotError(
-                "Cannot start streaming: Camera hardware is not active. "
-                "Call system.start_camera() first to activate the camera hardware."
-            )
+            print("ℹ️ Camera hardware is not active. Auto-enabling it...")
+            self.start_camera_service()
+            
+            # Explicit readiness synchronization: wait for hardware state to reflect the change
+            wait_start = time.time()
+            while not self._camera_hw_active and (time.time() - wait_start) < 5.0:
+                time.sleep(0.1)
+                
+            if not self._camera_hw_active:
+                raise BonicBotError(
+                    "Cannot start streaming: Camera hardware failed to report active status after enabling."
+                )
         
         try:
             # Clear any stale image from a previous session
