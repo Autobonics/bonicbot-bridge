@@ -19,8 +19,11 @@ pip install bonicbot-bridge
 ```python
 from bonicbot_bridge import BonicBot
 
-# Connect to robot (automatically finds robot on network)
+# Connect to robot (defaults to localhost)
 bot = BonicBot()
+
+# Or connect to a remote robot by IP/hostname
+# bot = BonicBot(host='192.168.1.100')
 
 # Basic movement
 bot.move_forward(speed=0.3, duration=2)
