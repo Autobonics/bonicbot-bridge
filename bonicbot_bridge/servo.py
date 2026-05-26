@@ -563,5 +563,23 @@ class ServoController:
         
         if simplified_name not in self.current_angles:
             raise BonicBotError(f"Unknown servo joint: {joint_name}")
-        
         return self.current_angles[simplified_name]
+
+    def shutdown(self):
+        """Release servo topics during teardown."""
+        try:
+            self.joint_state_sub.unsubscribe()
+        except Exception:
+            pass
+
+        for pub in (
+            self.left_arm_pub,
+            self.right_arm_pub,
+            self.head_pub,
+            self.left_gripper_pub,
+            self.right_gripper_pub,
+        ):
+            try:
+                pub.unadvertise()
+            except Exception:
+                pass

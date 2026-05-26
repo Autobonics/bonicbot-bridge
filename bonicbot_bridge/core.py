@@ -10,6 +10,8 @@ from .sensors import SensorManager
 from .system import SystemController
 from .camera import CameraManager
 from .servo import ServoController
+from .vision import VisionController
+from .autonomous import ExploreController
 from .exceptions import BonicConnectionError, BonicBotError
 
 class BonicBot:
@@ -57,6 +59,8 @@ class BonicBot:
             self.system = SystemController(self.ros)
             self.camera = CameraManager(self.ros)
             self.servo = ServoController(self.ros)
+            self.vision = VisionController(self.ros)
+            self.autonomous = ExploreController(self.ros, self.motion, self.sensors)
             
             self.connected = True
             print(f"🤖 Connected to BonicBot at {self.host}:{self.port}")
@@ -267,3 +271,85 @@ class BonicBot:
     def reset_servos(self):
         """Reset all servos to neutral position"""
         return self.servo.reset_all_servos()
+    # NEW — Precise-motion delegates
+    def drive_distance(self, dist, speed=0.3, engine="internal", timeout=30.0):
+        """Drive a specific distance. Delegates to: motion.drive_distance()"""
+        return self.motion.drive_distance(dist, speed, engine=engine, timeout=timeout)
+
+    def rotate_angle(self, angle, speed=45.0, engine="internal", timeout=30.0):
+        """Rotate by a specific angle. Delegates to: motion.rotate_angle()"""
+        return self.motion.rotate_angle(angle, speed, engine=engine, timeout=timeout)
+
+    def drive_and_rotate(self, dist, angle, speed=0.3, turn_speed=45.0, engine="internal", timeout=30.0):
+        """Drive then rotate. Delegates to: motion.drive_and_rotate()"""
+        return self.motion.drive_and_rotate(dist, angle, speed, turn_speed, engine=engine, timeout=timeout)
+
+    def set_default_engine(self, engine):
+        """Set default precise motion engine ('internal' or 'nav2'). Delegates to: motion.set_default_engine()"""
+        return self.motion.set_default_engine(engine)
+
+    def is_precise_moving(self):
+        """Check if a precise motion action is running. Delegates to: motion.is_precise_moving()"""
+        return self.motion.is_precise_moving()
+
+    # NEW — Command queue delegates
+    def enqueue_move(self, cmd_list):
+        """Push motion commands onto the queue. Delegates to: motion.enqueue_move()"""
+        return self.motion.enqueue_move(cmd_list)
+
+    def run_queue(self, block=True):
+        """Execute queued commands. Delegates to: motion.run_queue()"""
+        return self.motion.run_queue(block)
+
+    def clear_queue(self):
+        """Flush queue and stop current motion. Delegates to: motion.clear_queue()"""
+        return self.motion.clear_queue()
+
+    def draw_square(self, side_m, speed=0.3, turn_speed=45.0, engine="internal", timeout=30.0):
+        """Drive in a square pattern. Delegates to: motion.draw_square()"""
+        return self.motion.draw_square(side_m, speed=speed, turn_speed=turn_speed, engine=engine, timeout=timeout)
+
+    # NEW — Vision pipeline delegates
+    def enable_detection(self, mode, model='yolov8n', **kwargs):
+        """Enable a vision detection mode. Delegates to: vision.enable_detection()"""
+        return self.vision.enable_detection(mode, model=model, **kwargs)
+
+    def disable_detection(self):
+        """Disable the vision detection pipeline. Delegates to: vision.disable_detection()"""
+        return self.vision.disable_detection()
+
+    def get_active_mode(self):
+        """Get the currently active vision mode. Delegates to: vision.get_active_mode()"""
+        return self.vision.get_active_mode()
+
+    def get_detections(self, class_filter=None):
+        """Get latest detection results. Delegates to: vision.get_detections()"""
+        return self.vision.get_detections(class_filter=class_filter)
+
+    def get_faces(self):
+        """Get latest face detection results. Delegates to: vision.get_faces()"""
+        return self.vision.get_faces()
+
+    def get_pose_keypoints(self):
+        """Get latest pose keypoints. Delegates to: vision.get_pose_keypoints()"""
+        return self.vision.get_pose_keypoints()
+
+    def wait_for_detection(self, target_class, timeout=5.0):
+        """Wait for a specific detection class. Delegates to: vision.wait_for_detection()"""
+        return self.vision.wait_for_detection(target_class, timeout=timeout)
+
+    def get_gesture(self):
+        """Get current gesture class. Delegates to: vision.get_gesture()"""
+        return self.vision.get_gesture()
+
+    def get_gesture_full(self):
+        """Get full gesture result dict. Delegates to: vision.get_gesture_full()"""
+        return self.vision.get_gesture_full()
+
+    def get_aruco_markers(self):
+        """Get list of ArUco markers. Delegates to: vision.get_aruco_markers()"""
+        return self.vision.get_aruco_markers()
+
+    def wait_for_marker(self, marker_id, timeout=5.0):
+        """Wait for specific ArUco marker. Delegates to: vision.wait_for_marker()"""
+        return self.vision.wait_for_marker(marker_id, timeout=timeout)

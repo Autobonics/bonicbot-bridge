@@ -3,17 +3,22 @@ Motion controller for robot movement and navigation
 """
 
 import time
+import time
 import math
 import threading
 from roslibpy import Topic, Service, ServiceRequest
 from .exceptions import NavigationError
+from .precisemotion import QueueMixin
 
-class MotionController:
+class MotionController(QueueMixin):
     def __init__(self, ros_client):
         self.ros = ros_client
         
         # Movement publisher
         self.cmd_vel_pub = Topic(self.ros, '/cmd_vel', 'geometry_msgs/Twist')
+        self.cmd_vel_pub.advertise()
+        
+        self._init_queue()
         
         # Odometry subscription for closed-loop control
         self._odom_sub = Topic(self.ros, '/diff_cont/odom', 'nav_msgs/Odometry')
@@ -458,3 +463,26 @@ class MotionController:
     def is_moving(self):
         """Check if robot is currently moving"""
         return self.nav_status == 'navigating'
+    def shutdown(self):
+        """Release motion subscriptions during teardown."""
+        try:
+            self._queue_shutdown()
+        except Exception as exc:
+            pass
+        
+        try:
+            self.stop()
+        except Exception:
+            pass
+            
+        for pub in (self.goal_pub, self.cmd_vel_pub):
+            try:
+                pub.unadvertise()
+            except Exception:
+                pass
+                
+        for sub in (self._odom_sub, self.nav_status_sub, self.distance_sub):
+            try:
+                sub.unsubscribe()
+            except Exception:
+                pass
