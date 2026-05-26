@@ -292,6 +292,14 @@ class BonicBot:
         """Check if a precise motion action is running. Delegates to: motion.is_precise_moving()"""
         return self.motion.is_precise_moving()
 
+    def set_speed_limits(self, max_linear=None, max_angular=None):
+        """Set velocity safety limits (m/s, deg/s). Delegates to: motion.set_speed_limits()"""
+        return self.motion.set_speed_limits(max_linear, max_angular)
+
+    def get_speed_limits(self):
+        """Get current velocity safety limits. Delegates to: motion.get_speed_limits()"""
+        return self.motion.get_speed_limits()
+
     # NEW — Command queue delegates
     def enqueue_move(self, cmd_list):
         """Push motion commands onto the queue. Delegates to: motion.enqueue_move()"""

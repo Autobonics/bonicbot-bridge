@@ -3,16 +3,25 @@ Motion controller for robot movement and navigation
 """
 
 import time
-import time
 import math
 import threading
 from roslibpy import Topic, Service, ServiceRequest
 from .exceptions import NavigationError
 from .precisemotion import QueueMixin
 
+# ── Velocity safety limits ─────────────────────────────────────────────
+# Conservative defaults for a small differential-drive indoor robot.
+# These can be overridden at runtime via MotionController.set_speed_limits().
+MAX_LINEAR_SPEED = 1.0       # m/s  (absolute value, applies to linear_x & linear_y)
+MAX_ANGULAR_SPEED = 180.0    # deg/s (absolute value, applied before rad/s conversion)
+
 class MotionController(QueueMixin):
     def __init__(self, ros_client):
         self.ros = ros_client
+        
+        # Velocity limits (instance-level so they can be tuned per robot)
+        self._max_linear_speed = MAX_LINEAR_SPEED
+        self._max_angular_speed = MAX_ANGULAR_SPEED
         
         # Movement publisher
         self.cmd_vel_pub = Topic(self.ros, '/cmd_vel', 'geometry_msgs/Twist')
@@ -132,9 +141,75 @@ class MotionController(QueueMixin):
         self.stop()
         return math.degrees(accumulated) * (1.0 if angle_rad > 0 else -1.0)
     
+    # ── Speed limit helpers ───────────────────────────────────────────
+
+    def set_speed_limits(self, max_linear=None, max_angular=None):
+        """Override the default velocity safety limits.
+
+        Call this after construction if the robot's hardware supports
+        different speed ranges than the built-in defaults.
+
+        Args:
+            max_linear (float | None): Maximum absolute linear speed in m/s.
+                If ``None``, the current limit is kept.
+            max_angular (float | None): Maximum absolute angular speed in deg/s.
+                If ``None``, the current limit is kept.
+
+        Raises:
+            ValueError: If a supplied limit is not positive.
+        """
+        if max_linear is not None:
+            if max_linear <= 0:
+                raise ValueError("max_linear must be positive")
+            self._max_linear_speed = float(max_linear)
+        if max_angular is not None:
+            if max_angular <= 0:
+                raise ValueError("max_angular must be positive")
+            self._max_angular_speed = float(max_angular)
+
+    def get_speed_limits(self):
+        """Return the current velocity safety limits.
+
+        Returns:
+            dict: ``{'max_linear': float, 'max_angular': float}``
+                  Linear in m/s, angular in deg/s.
+        """
+        return {
+            'max_linear': self._max_linear_speed,
+            'max_angular': self._max_angular_speed,
+        }
+
+    def _clamp_velocity(self, value, limit, label):
+        """Clamp *value* to [-limit, +limit] and warn if clamped.
+
+        Follows the same clamp-and-warn pattern as
+        ``ServoController._validate_angle`` — the command still executes,
+        but at the safe maximum instead of the dangerous requested value.
+
+        Args:
+            value (float): Requested velocity component.
+            limit (float): Maximum absolute value.
+            label (str): Human-readable name for the warning message.
+
+        Returns:
+            float: Clamped velocity.
+        """
+        if abs(value) > limit:
+            clamped = max(-limit, min(limit, value))
+            print(
+                f"⚠️ {label}={value} exceeds limit ±{limit}, "
+                f"clamping to {clamped}"
+            )
+            return clamped
+        return value
+
     def move(self, linear_x=0, linear_y=0, angular_z=0):
         """
         Send velocity command to robot.
+
+        Values are clamped to the configured safety limits before
+        publishing.  Use ``set_speed_limits()`` to adjust the limits
+        for your specific hardware.
 
         Args:
             linear_x (float): Forward/backward velocity in m/s.
@@ -156,6 +231,17 @@ class MotionController(QueueMixin):
             >>> bot.motion.move(angular_z=30.0)        # Spin left at 30 deg/s
             >>> bot.motion.move(linear_x=0.2, angular_z=-20.0)  # Arc right
         """
+        # Clamp velocities to configured safety limits
+        linear_x = self._clamp_velocity(
+            linear_x, self._max_linear_speed, 'linear_x'
+        )
+        linear_y = self._clamp_velocity(
+            linear_y, self._max_linear_speed, 'linear_y'
+        )
+        angular_z = self._clamp_velocity(
+            angular_z, self._max_angular_speed, 'angular_z'
+        )
+
         # Convert angular velocity from deg/s to rad/s for ROS
         angular_z_rad = math.radians(angular_z)
         
