@@ -154,6 +154,10 @@ class BonicBot:
         self.disconnect()
     
     # Quick access methods (delegate to controllers)
+    def move(self, linear_x=0, linear_y=0, angular_z=0):
+        """Low-level velocity control for custom robot movement patterns"""
+        return self.motion.move(linear_x, linear_y, angular_z)
+        
     def move_forward(self, speed=0.3, duration=None):
         """Move robot forward"""
         return self.motion.move_forward(speed, duration)
