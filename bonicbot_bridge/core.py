@@ -202,6 +202,10 @@ class BonicBot:
         """Get current robot heading in degrees"""
         return self.sensors.get_heading()
         
+    def get_heading_degrees(self):
+        """Get current robot heading in degrees"""
+        return self.sensors.get_heading_degrees()
+        
     def start_mapping(self):
         """Start mapping mode"""
         return self.system.start_mapping()
