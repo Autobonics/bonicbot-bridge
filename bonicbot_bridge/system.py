@@ -99,13 +99,11 @@ class SystemController:
         except Exception as e:
             raise BonicSystemError(f"Mapping stop failed: {str(e)}")
     
-    def save_map(self, name="my_map"):
+    def save_map(self):
         """
-        Save the current map
+        Save the current map.
+        Note: The map name is determined automatically by the backend system.
         
-        Args:
-            name: Map name (default: "my_map")
-            
         Returns:
             bool: True if map saved successfully
         """
