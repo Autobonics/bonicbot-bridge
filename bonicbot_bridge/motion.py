@@ -417,6 +417,21 @@ class MotionController(QueueMixin):
     def stop(self):
         """Stop all robot movement"""
         self.move(0, 0, 0)
+        
+    def _validate_coordinate(self, value, name, limit=10000.0):
+        """Validate coordinate is finite and within reasonable bounds."""
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            raise NavigationError(f"Coordinate '{name}' must be a numeric value.")
+            
+        if not math.isfinite(val):
+            raise NavigationError(f"Coordinate '{name}' cannot be NaN or infinity.")
+            
+        if limit is not None and abs(val) > limit:
+            raise NavigationError(f"Coordinate '{name}' exceeds maximum allowed range (±{limit}).")
+            
+        return val
     
     def go_to(self, x, y, theta=0):
         """
@@ -432,6 +447,10 @@ class MotionController(QueueMixin):
         """
         if not self.navigation_active:
             raise NavigationError("Cannot set goal: Navigation system is not active. Call start_navigation() first.")
+            
+        x = self._validate_coordinate(x, 'x')
+        y = self._validate_coordinate(y, 'y')
+        theta = self._validate_coordinate(theta, 'theta', limit=None)
             
         try:
             # Convert degrees to radians for ROS message
@@ -506,6 +525,10 @@ class MotionController(QueueMixin):
         Returns:
             bool: True if pose was set successfully
         """
+        x = self._validate_coordinate(x, 'x')
+        y = self._validate_coordinate(y, 'y')
+        theta = self._validate_coordinate(theta, 'theta', limit=None)
+        
         try:
             # Convert degrees to radians for ROS message
             theta_rad = math.radians(theta)
