@@ -54,11 +54,18 @@ class SystemController:
     
     def start_mapping(self):
         """
-        Start SLAM mapping mode
+        Start SLAM mapping mode.
+
+        This method is idempotent — calling it when mapping is
+        already active is a safe no-op.
         
         Returns:
-            bool: True if mapping started successfully
+            bool: True if mapping started (or was already active)
         """
+        if self.mapping_active:
+            print("ℹ️ Mapping is already active, nothing to start")
+            return True
+
         try:
             request = ServiceRequest()
             response = self.start_mapping_srv.call(request)
@@ -117,11 +124,18 @@ class SystemController:
     
     def start_navigation(self):
         """
-        Start navigation mode (requires saved map or active mapping)
+        Start navigation mode (requires saved map or active mapping).
+
+        This method is idempotent — calling it when navigation is
+        already active is a safe no-op.
         
         Returns:
-            bool: True if navigation started successfully
+            bool: True if navigation started (or was already active)
         """
+        if self.navigation_active:
+            print("ℹ️ Navigation is already active, nothing to start")
+            return True
+
         try:
             request = ServiceRequest()
             response = self.start_nav_srv.call(request)
@@ -263,31 +277,38 @@ class SystemController:
     
     def quick_map_and_nav(self):
         """
-        Helper function for simultaneous mapping and navigation
-        Useful for exploring unknown areas
+        Helper function for simultaneous mapping and navigation.
+        Useful for exploring unknown areas.
+
+        This method is idempotent — subsystems that are already
+        running are silently skipped.
         
         Returns:
-            bool: True if both started successfully  
+            bool: True if both subsystems are active after the call
         """
         print("🔧 Starting mapping and navigation together...")
         
-        success = True
+        # Start mapping (idempotent — no-op if already active)
+        try:
+            self.start_mapping()
+        except BonicSystemError as e:
+            print(f"⚠️ Could not start mapping: {e}")
+            if not self.mapping_active:
+                print("❌ Mapping is not active — aborting")
+                return False
+            # Mapping is active despite the error (race condition),
+            # so we can safely continue.
+            print("ℹ️ Mapping is active despite the error, continuing")
         
-        # Start mapping first (skip if already active)
-        if self.mapping_active:
-            print("ℹ️ Mapping is already active, skipping start_mapping")
-        elif not self.start_mapping():
-            success = False
-        
-        # Then start navigation (skip if already active)
-        if self.navigation_active:
-            print("ℹ️ Navigation is already active, skipping start_navigation")
-        elif success and not self.start_navigation():
-            success = False
+        # Start navigation (idempotent — no-op if already active)
+        try:
+            self.start_navigation()
+        except BonicSystemError as e:
+            print(f"⚠️ Could not start navigation: {e}")
+            if not self.navigation_active:
+                print("❌ Navigation is not active — aborting")
+                return False
+            print("ℹ️ Navigation is active despite the error, continuing")
             
-        if success:
-            print("✅ Robot ready for exploration (mapping + navigation)")
-        else:
-            print("❌ Failed to start mapping and navigation")
-            
-        return success
+        print("✅ Robot ready for exploration (mapping + navigation)")
+        return True
