@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BonicBot Dashboard</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <!-- SocketIO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body>
+    <header class="dashboard-header">
+        <div class="header-left">
+            <h1>🤖 BonicBot Dashboard</h1>
+            <span id="ros-status" class="badge {% if connected %}badge-green{% else %}badge-red{% endif %}">
+                {% if connected %}ROS Connected{% else %}ROS Disconnected{% endif %}
+            </span>
+        </div>
+        <div class="header-right">
+            <span id="robot-state-badge" class="badge badge-grey">State: UNKNOWN</span>
+            <span id="fps-counter" class="mono-text">Map: 0.0 Hz</span>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <!-- LEFT PANEL: Status & Mapping Controls -->
+        <section class="panel left-panel">
+            <div class="card">
+                <h2>Status</h2>
+                <div class="status-list">
+                    <div class="status-item">
+                        <span>Mapping</span>
+                        <div id="indicator-mapping" class="indicator"></div>
+                    </div>
+                    <div class="status-item">
+                        <span>Navigation</span>
+                        <div id="indicator-navigation" class="indicator"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Mapping Controls</h2>
+                <div class="button-group">
+                    <button id="btn-map-start" class="btn btn-primary" onclick="apiCall('/api/mapping/start')">Start Mapping</button>
+                    <button id="btn-map-stop" class="btn btn-danger" onclick="apiCall('/api/mapping/stop')" disabled>Stop Mapping</button>
+                    <button id="btn-map-save" class="btn btn-secondary" onclick="apiCall('/api/mapping/save')">Save Map</button>
+                </div>
+                <div class="data-readout mt-4">
+                    <span>Explored Area: </span>
+                    <span id="area-readout" class="mono-text">0.0 m²</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- CENTER PANEL: Map Canvas -->
+        <section class="panel center-panel">
+            <div class="canvas-container" id="canvas-wrapper">
+                <canvas id="map-canvas"></canvas>
+                <!-- Toast Container -->
+                <div id="toast-container"></div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: Navigation Controls -->
+        <section class="panel right-panel">
+            <div class="card">
+                <h2>Navigation</h2>
+                
+                <!-- Row 1: Stack controls -->
+                <div class="button-group mb-3">
+                    <button id="btn-nav-start" class="btn btn-primary" onclick="apiCall('/api/navigation/start')">Start Nav2</button>
+                    <button id="btn-nav-stop" class="btn btn-danger" onclick="apiCall('/api/navigation/stop')" disabled>Stop Nav2</button>
+                </div>
+                
+                <!-- Row 2: Status text -->
+                <div id="nav-status-text" class="mono-text mb-3">idle</div>
+                
+                <!-- Row 3: Goal inputs + actions -->
+                <div class="input-group">
+                    <div class="coord-inputs mb-2">
+                        <label>X (m)</label>   <input id="input-x"     type="number" step="0.1">
+                        <label>Y (m)</label>   <input id="input-y"     type="number" step="0.1">
+                        <label>θ (°)</label>   <input id="input-theta" type="number" step="1" value="0">
+                    </div>
+                    <div class="button-group">
+                        <button class="btn btn-primary" onclick="sendGoal()">Set Goal</button>
+                        <button class="btn btn-secondary" onclick="sendInitialPose()">Set Initial Pose</button>
+                        <button id="btn-cancel-goal" class="btn btn-danger" onclick="cancelGoal()" disabled>Cancel Goal</button>
+                    </div>
+                </div>
+
+                <!-- Row 4: Saved locations -->
+                <div class="input-group mt-4">
+                    <label>Saved Locations</label>
+                    <div class="coord-inputs mb-2">
+                        <select id="select-location" style="flex: 1;">
+                            <option value="">Select location...</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="gotoLocation()">Go</button>
+                    </div>
+                    <div class="coord-inputs">
+                        <input type="text" id="input-loc-name" placeholder="Location name" style="flex: 1;">
+                        <button class="btn btn-secondary" onclick="saveLocation()">Save</button>
+                        <button class="btn btn-danger" onclick="deleteLocation()">Delete</button>
+                    </div>
+                </div>
+                
+                <!-- Row 5: Distance readout -->
+                <div class="data-readout mt-4">
+                    <span>Distance: </span>
+                    <span id="distance-readout" class="mono-text">— m</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
