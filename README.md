@@ -828,14 +828,14 @@ bot.sensors.subscribe_to_position(position_callback)
 ### Error Handling
 
 ```python
-from bonicbot_bridge import BonicBot, ConnectionError, NavigationError
+from bonicbot_bridge import BonicBot, BonicConnectionError, NavigationError
 
 try:
     with BonicBot(host='192.168.1.100') as bot:
         bot.start_navigation()
         bot.go_to(5, 5)
 
-except ConnectionError as e:
+except BonicConnectionError as e:
     print(f"Could not connect to robot: {e}")
 
 except NavigationError as e:
@@ -937,7 +937,7 @@ The library communicates with these ROS2 topics and services:
 **Connection Failed**
 
 ```
-ConnectionError: Failed to connect to robot at localhost:9090
+BonicConnectionError: Failed to connect to robot at localhost:9090
 ```
 
 - Ensure rosbridge_server is running: `ros2 launch rosbridge_server rosbridge_websocket_launch.xml`

@@ -3,7 +3,7 @@ System controller for high-level robot operations
 """
 
 from roslibpy import Topic, Service, ServiceRequest
-from .exceptions import SystemError
+from .exceptions import BonicSystemError
 
 class SystemController:
     def __init__(self, ros_client):
@@ -64,13 +64,13 @@ class SystemController:
             response = self.start_mapping_srv.call(request)
             
             if not response['success']:
-                raise SystemError(f"Failed to start mapping: {response['message']}")
+                raise BonicSystemError(f"Failed to start mapping: {response['message']}")
             
             print("🗺️ Mapping started - robot will create a map as it moves")
             return True
             
         except Exception as e:
-            raise SystemError(f"Mapping start failed: {str(e)}")
+            raise BonicSystemError(f"Mapping start failed: {str(e)}")
     
     def stop_mapping(self):
         """
@@ -84,13 +84,13 @@ class SystemController:
             response = self.stop_mapping_srv.call(request)
             
             if not response['success']:
-                raise SystemError(f"Failed to stop mapping: {response['message']}")
+                raise BonicSystemError(f"Failed to stop mapping: {response['message']}")
             
             print("🛑 Mapping stopped")
             return True
             
         except Exception as e:
-            raise SystemError(f"Mapping stop failed: {str(e)}")
+            raise BonicSystemError(f"Mapping stop failed: {str(e)}")
     
     def save_map(self, name="my_map"):
         """
@@ -107,13 +107,13 @@ class SystemController:
             response = self.save_map_srv.call(request)
             
             if not response['success']:
-                raise SystemError(f"Failed to save map: {response['message']}")
+                raise BonicSystemError(f"Failed to save map: {response['message']}")
             
             print(f"💾 Map saved successfully: {response['message']}")
             return True
             
         except Exception as e:
-            raise SystemError(f"Map save failed: {str(e)}")
+            raise BonicSystemError(f"Map save failed: {str(e)}")
     
     def start_navigation(self):
         """
@@ -127,13 +127,13 @@ class SystemController:
             response = self.start_nav_srv.call(request)
             
             if not response['success']:
-                raise SystemError(f"Failed to start navigation: {response['message']}")
+                raise BonicSystemError(f"Failed to start navigation: {response['message']}")
             
             print("🧭 Navigation started - robot can now navigate to goals")
             return True
             
         except Exception as e:
-            raise SystemError(f"Navigation start failed: {str(e)}")
+            raise BonicSystemError(f"Navigation start failed: {str(e)}")
     
     def stop_navigation(self):
         """
@@ -147,13 +147,13 @@ class SystemController:
             response = self.stop_nav_srv.call(request)
             
             if not response['success']:
-                raise SystemError(f"Failed to stop navigation: {response['message']}")
+                raise BonicSystemError(f"Failed to stop navigation: {response['message']}")
             
             print("🛑 Navigation stopped")
             return True
             
         except Exception as e:
-            raise SystemError(f"Navigation stop failed: {str(e)}")
+            raise BonicSystemError(f"Navigation stop failed: {str(e)}")
     
     def get_system_status(self):
         """
@@ -194,13 +194,13 @@ class SystemController:
             response = self.start_camera_srv.call(request)
             
             if not response['success']:
-                raise SystemError(f"Failed to start camera: {response['message']}")
+                raise BonicSystemError(f"Failed to start camera: {response['message']}")
             
             print("📷 Camera started")
             return True
             
         except Exception as e:
-            raise SystemError(f"Camera start failed: {str(e)}")
+            raise BonicSystemError(f"Camera start failed: {str(e)}")
     
     def stop_camera(self):
         """
@@ -214,13 +214,13 @@ class SystemController:
             response = self.stop_camera_srv.call(request)
             
             if not response['success']:
-                raise SystemError(f"Failed to stop camera: {response['message']}")
+                raise BonicSystemError(f"Failed to stop camera: {response['message']}")
             
             print("🛑 Camera stopped")
             return True
             
         except Exception as e:
-            raise SystemError(f"Camera stop failed: {str(e)}")
+            raise BonicSystemError(f"Camera stop failed: {str(e)}")
     
     def is_camera_active(self):
         """Check if camera system is active"""

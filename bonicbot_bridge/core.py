@@ -10,7 +10,7 @@ from .sensors import SensorManager
 from .system import SystemController
 from .camera import CameraManager
 from .servo import ServoController
-from .exceptions import ConnectionError, BonicBotError
+from .exceptions import BonicConnectionError, BonicBotError
 
 class BonicBot:
     def __init__(self, host='localhost', port=9090, timeout=10):
@@ -49,7 +49,7 @@ class BonicBot:
                 time.sleep(0.1)
                 
             if not self.ros.is_connected:
-                raise ConnectionError(f"Failed to connect to robot at {self.host}:{self.port}")
+                raise BonicConnectionError(f"Failed to connect to robot at {self.host}:{self.port}")
                 
             # Initialize controllers
             self.motion = MotionController(self.ros)
@@ -62,7 +62,7 @@ class BonicBot:
             print(f"🤖 Connected to BonicBot at {self.host}:{self.port}")
             
         except Exception as e:
-            raise ConnectionError(f"Connection failed: {str(e)}")
+            raise BonicConnectionError(f"Connection failed: {str(e)}")
     
     def disconnect(self):
         """Disconnect from robot"""
