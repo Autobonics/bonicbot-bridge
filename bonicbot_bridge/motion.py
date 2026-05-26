@@ -69,7 +69,20 @@ class MotionController(QueueMixin):
         self.nav_active_sub = Topic(self.ros, '/robot/navigation_active', 'std_msgs/Bool')
         self.navigation_active = False
         self.nav_active_sub.subscribe(self._nav_active_callback)
-        
+    
+    def _safe_publish(self, topic, msg):
+        """Publish with connection guard — absorbs transient websocket errors."""
+        if not self.ros.is_connected:
+            return  # Silently skip; reconnection handler will restore the link
+        try:
+            topic.publish(msg)
+        except Exception as e:
+            err = str(e).lower()
+            if any(s in err for s in ('json', 'unexpected character', '<html', 'not connected', 'websocket')):
+                print(f"⚠️ Publish skipped (websocket degraded): {e}")
+                return
+            raise
+
     def _odom_callback(self, msg):
         """Extract yaw from odometry quaternion for closed-loop turns."""
         q = msg['pose']['pose']['orientation']
@@ -272,7 +285,7 @@ class MotionController(QueueMixin):
             'linear': {'x': linear_x, 'y': linear_y, 'z': 0.0},
             'angular': {'x': 0.0, 'y': 0.0, 'z': angular_z_rad}
         }
-        self.cmd_vel_pub.publish(msg)
+        self._safe_publish(self.cmd_vel_pub, msg)
     
     @_with_motion_lock
     def move_forward(self, speed=0.3, duration=None):
@@ -483,7 +496,7 @@ class MotionController(QueueMixin):
     def start_navigation(self):
         """Start navigation system"""
         request = ServiceRequest()
-        response = self.start_nav_srv.call(request)
+        response = self.start_nav_srv.call(request, timeout=30)
         
         if not response['success']:
             raise NavigationError(f"Failed to start navigation: {response['message']}")
@@ -494,7 +507,7 @@ class MotionController(QueueMixin):
     def stop_navigation(self):
         """Stop navigation system"""
         request = ServiceRequest()
-        response = self.stop_nav_srv.call(request)
+        response = self.stop_nav_srv.call(request, timeout=30)
         
         if not response['success']:
             raise NavigationError(f"Failed to stop navigation: {response['message']}")
@@ -505,7 +518,7 @@ class MotionController(QueueMixin):
     def cancel_goal(self):
         """Cancel current navigation goal"""
         request = ServiceRequest()
-        response = self.cancel_nav_srv.call(request)
+        response = self.cancel_nav_srv.call(request, timeout=30)
         
         if not response['success']:
             raise NavigationError(f"Failed to cancel goal: {response['message']}")

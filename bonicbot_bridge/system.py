@@ -68,7 +68,7 @@ class SystemController:
 
         try:
             request = ServiceRequest()
-            response = self.start_mapping_srv.call(request)
+            response = self.start_mapping_srv.call(request, timeout=30)
             
             if not response['success']:
                 raise BonicSystemError(f"Failed to start mapping: {response['message']}")
@@ -88,7 +88,7 @@ class SystemController:
         """
         try:
             request = ServiceRequest()
-            response = self.stop_mapping_srv.call(request)
+            response = self.stop_mapping_srv.call(request, timeout=30)
             
             if not response['success']:
                 raise BonicSystemError(f"Failed to stop mapping: {response['message']}")
@@ -111,7 +111,7 @@ class SystemController:
         """
         try:
             request = ServiceRequest()
-            response = self.save_map_srv.call(request)
+            response = self.save_map_srv.call(request, timeout=30)
             
             if not response['success']:
                 raise BonicSystemError(f"Failed to save map: {response['message']}")
@@ -138,7 +138,7 @@ class SystemController:
 
         try:
             request = ServiceRequest()
-            response = self.start_nav_srv.call(request)
+            response = self.start_nav_srv.call(request, timeout=30)
             
             if not response['success']:
                 raise BonicSystemError(f"Failed to start navigation: {response['message']}")
@@ -158,7 +158,7 @@ class SystemController:
         """
         try:
             request = ServiceRequest()
-            response = self.stop_nav_srv.call(request)
+            response = self.stop_nav_srv.call(request, timeout=30)
             
             if not response['success']:
                 raise BonicSystemError(f"Failed to stop navigation: {response['message']}")
@@ -205,7 +205,7 @@ class SystemController:
         """
         try:
             request = ServiceRequest()
-            response = self.start_camera_srv.call(request)
+            response = self.start_camera_srv.call(request, timeout=30)
             
             if not response['success']:
                 raise BonicSystemError(f"Failed to start camera: {response['message']}")
@@ -232,7 +232,7 @@ class SystemController:
 
         try:
             request = ServiceRequest()
-            response = self.stop_camera_srv.call(request)
+            response = self.stop_camera_srv.call(request, timeout=30)
             
             if not response['success']:
                 raise BonicSystemError(f"Failed to stop camera: {response['message']}")

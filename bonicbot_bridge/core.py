@@ -4,6 +4,7 @@ Core BonicBot class for robot control
 
 import time
 import math
+import threading
 from roslibpy import Ros, Topic, Service, ServiceRequest
 from .motion import MotionController
 from .sensors import SensorManager  
@@ -28,6 +29,8 @@ class BonicBot:
         self.port = port
         self.ros = None
         self.connected = False
+        self._reconnect_lock = threading.Lock()
+        self._reconnecting = False
         
         # Controllers
         self.motion = None
@@ -63,6 +66,7 @@ class BonicBot:
             self.autonomous = ExploreController(self.ros)
             
             self.connected = True
+            self.ros.on('close', lambda event: self._on_connection_lost())
             print(f"🤖 Connected to BonicBot at {self.host}:{self.port}")
             
         except Exception as e:
@@ -70,11 +74,71 @@ class BonicBot:
     
     def disconnect(self):
         """Disconnect from robot"""
+        self.connected = False  # Set first to prevent reconnect handler
         if self.ros and self.ros.is_connected:
             self.motion.stop()  # Safety stop
             self.ros.terminate()
-            self.connected = False
             print("🔌 Disconnected from BonicBot")
+    
+    def _on_connection_lost(self):
+        """Handle unexpected websocket disconnection."""
+        if not self.connected:
+            return  # Intentional disconnect, don't reconnect
+        self.connected = False
+        print("⚠️ WebSocket connection lost — attempting reconnection...")
+        threading.Thread(target=self._reconnect_loop, daemon=True).start()
+    
+    def _reconnect_loop(self, max_attempts=5, base_delay=2.0):
+        """Reconnect with exponential backoff."""
+        with self._reconnect_lock:
+            if self._reconnecting:
+                return
+            self._reconnecting = True
+        
+        try:
+            for attempt in range(1, max_attempts + 1):
+                delay = min(base_delay * (2 ** (attempt - 1)), 30.0)
+                print(f"  🔄 Reconnect attempt {attempt}/{max_attempts} in {delay:.1f}s...")
+                time.sleep(delay)
+                
+                try:
+                    try:
+                        self.ros.close()
+                    except Exception:
+                        pass
+                    
+                    self.ros = Ros(host=self.host, port=self.port)
+                    self.ros.run()
+                    
+                    t0 = time.time()
+                    while not self.ros.is_connected and (time.time() - t0) < 10:
+                        time.sleep(0.1)
+                    
+                    if self.ros.is_connected:
+                        self._reinitialize_controllers()
+                        self.ros.on('close', lambda event: self._on_connection_lost())
+                        self.connected = True
+                        print(f"  ✅ Reconnected on attempt {attempt}")
+                        return
+                except Exception as e:
+                    print(f"  ❌ Attempt {attempt} failed: {e}")
+            
+            print("  ❌ All reconnection attempts exhausted")
+        finally:
+            self._reconnecting = False
+    
+    def _reinitialize_controllers(self):
+        """Re-create all controllers with the new connection."""
+        try:
+            self.motion = MotionController(self.ros)
+            self.sensors = SensorManager(self.ros)
+            self.system = SystemController(self.ros)
+            self.camera = CameraManager(self.ros)
+            self.servo = ServoController(self.ros)
+            self.vision = VisionController(self.ros)
+            self.autonomous = ExploreController(self.ros)
+        except Exception as e:
+            print(f"  ⚠️ Controller re-init partial failure: {e}")
     
     def __enter__(self):
         """Context manager entry"""
