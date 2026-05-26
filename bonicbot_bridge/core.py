@@ -214,9 +214,9 @@ class BonicBot:
         """Stop mapping mode"""  
         return self.system.stop_mapping()
         
-    def save_map(self):
+    def save_map(self, name=None):
         """Save current map"""
-        return self.system.save_map()
+        return self.system.save_map(name=name)
     
     def start_navigation(self):
         """Start navigation system"""
