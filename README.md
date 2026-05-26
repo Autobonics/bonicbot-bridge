@@ -24,7 +24,7 @@ bot = BonicBot()
 
 # Basic movement
 bot.move_forward(speed=0.3, duration=2)
-bot.turn_left(speed=0.5, duration=1)
+bot.turn_left(speed=30.0, duration=1)
 bot.stop()
 
 # Sensors
@@ -45,7 +45,7 @@ bot.disconnect()
 ```python
 with BonicBot() as bot:
     bot.move_forward(0.3, duration=2)
-    bot.turn_right(0.5, duration=1)
+    bot.turn_right(30.0, duration=1)
     # Automatically disconnects when done
 ```
 
