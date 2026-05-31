@@ -28,7 +28,7 @@ import traceback
 from roslibpy import ActionClient, Goal, Topic
 
 from .exceptions import NavigationError, PreciseMotionError
-from .utils import MAX_PRECISE_DISTANCE, ODOMETRY_MESSAGE_TYPE, safe_unsubscribe
+from .utils import DIFF_CONT_ODOM_TOPIC, MAX_PRECISE_DISTANCE, ODOMETRY_MESSAGE_TYPE, safe_unsubscribe
 
 # ── Queue command types ────────────────────────────────────────────────
 CMD_TYPE_DRIVE = "drive"
@@ -46,7 +46,6 @@ QUEUE_POLL_INTERVAL_SECONDS = 0.05   # 50 ms between empty-queue checks
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Odometry topic (shared with sensors.py but independent subscription)
-ODOM_TOPIC = "/diff_cont/odom"
 
 # Internal engine control loop
 ODOM_POLL_INTERVAL_SECONDS = 0.05  # 20 Hz control loop
@@ -107,7 +106,7 @@ class QueueMixin:
         self._queue_result = True
 
         # NEW — Odometry subscription for closed-loop drive methods
-        self._odom_sub = Topic(self.ros, ODOM_TOPIC, ODOMETRY_MESSAGE_TYPE)
+        self._odom_sub = Topic(self.ros, DIFF_CONT_ODOM_TOPIC, ODOMETRY_MESSAGE_TYPE)
         self._current_odom = None
         self._odom_sub.subscribe(self._odom_callback)
 

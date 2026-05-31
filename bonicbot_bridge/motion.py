@@ -17,15 +17,15 @@ from .utils import (
     POSE_WITH_COVARIANCE_MESSAGE_TYPE,
     STRING_MESSAGE_TYPE,
     TWIST_MESSAGE_TYPE,
+    CMD_VEL_TOPIC,
+    GOAL_POSE_TOPIC,
+    INITIAL_POSE_TOPIC,
+    NAV_STATUS_TOPIC,
+    DISTANCE_TO_GOAL_TOPIC,
+    CANCEL_NAVIGATION_SERVICE,
     safe_unsubscribe,
 )
 
-CMD_VEL_TOPIC = "/cmd_vel"
-GOAL_POSE_TOPIC = "/goal_pose"
-INITIAL_POSE_TOPIC = "/initialpose"
-NAV_STATUS_TOPIC = "/robot/nav_status"
-DISTANCE_TO_GOAL_TOPIC = "/robot/distance_to_goal"
-CANCEL_NAVIGATION_SERVICE = "/robot/cancel_navigation"
 # START_NAVIGATION_SERVICE and STOP_NAVIGATION_SERVICE are imported from utils
 
 DEFAULT_LINEAR_SPEED = 0.3
@@ -449,6 +449,13 @@ class MotionController(QueueMixin):
         """
         return self._goal_active and self.nav_status == NAV_STATUS_NAVIGATING
 
+    def subscribe_to_nav_status(self, callback):
+        # roslibpy.Topic.subscribe() is a no-op when already subscribed,
+        # so we use ros.on() directly to add extra callbacks.
+        self.ros.on(NAV_STATUS_TOPIC, callback)
+
+    def subscribe_to_distance_to_goal(self, callback):
+        self.ros.on(DISTANCE_TO_GOAL_TOPIC, callback)
 
     def shutdown(self):
         """Release motion subscriptions during teardown."""

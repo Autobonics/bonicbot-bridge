@@ -88,25 +88,32 @@ function buildMapImageData(data, width, height) {
     if (!mapCtx) return null;
     const imgData = mapCtx.createImageData(width, height);
     
-    for (let i = 0; i < data.length; i++) {
-        const val = data[i];
-        const idx = i * 4;
-        
-        if (val === -1) {
-            imgData.data[idx] = 128;
-            imgData.data[idx + 1] = 128;
-            imgData.data[idx + 2] = 128;
-            imgData.data[idx + 3] = 255;
-        } else if (val === 0) {
-            imgData.data[idx] = 255;
-            imgData.data[idx + 1] = 255;
-            imgData.data[idx + 2] = 255;
-            imgData.data[idx + 3] = 255;
-        } else {
-            imgData.data[idx] = 0;
-            imgData.data[idx + 1] = 0;
-            imgData.data[idx + 2] = 0;
-            imgData.data[idx + 3] = 255;
+    // ROS OccupancyGrid row 0 = bottom of map (Y-up convention).
+    // Browser ImageData row 0 = top of image.  Flip rows here so
+    // we can use positive scale in both axes during rendering,
+    // preserving correct left/right orientation.
+    for (let srcRow = 0; srcRow < height; srcRow++) {
+        const dstRow = height - 1 - srcRow;  // flip vertically
+        for (let col = 0; col < width; col++) {
+            const val = data[srcRow * width + col];
+            const idx = (dstRow * width + col) * 4;
+            
+            if (val === -1) {
+                imgData.data[idx] = 128;
+                imgData.data[idx + 1] = 128;
+                imgData.data[idx + 2] = 128;
+                imgData.data[idx + 3] = 255;
+            } else if (val === 0) {
+                imgData.data[idx] = 255;
+                imgData.data[idx + 1] = 255;
+                imgData.data[idx + 2] = 255;
+                imgData.data[idx + 3] = 255;
+            } else {
+                imgData.data[idx] = 0;
+                imgData.data[idx + 1] = 0;
+                imgData.data[idx + 2] = 0;
+                imgData.data[idx + 3] = 255;
+            }
         }
     }
     return imgData;
@@ -141,9 +148,11 @@ function renderMapLayer() {
     mapCtx.scale(viewScale, viewScale);
     mapCtx.translate(-cW / 2, -cH / 2);
     
-    mapCtx.translate(drawOffsetX + (width * scale) / 2, drawOffsetY + (height * scale) / 2);
-    mapCtx.scale(scale, -scale);
-    mapCtx.drawImage(off, -width / 2, -height / 2);
+    // Row-flip is done in buildMapImageData, so both axes are positive.
+    // This keeps the coordinate system right-handed and avoids L/R inversion.
+    mapCtx.translate(drawOffsetX, drawOffsetY);
+    mapCtx.scale(scale, scale);
+    mapCtx.drawImage(off, 0, 0);
     
     mapCtx.restore();
 }
@@ -171,27 +180,30 @@ function renderPoseLayer() {
     
     const width = mapState.info.width;
     const height = mapState.info.height;
-    const scale = mapState.scale;
-    const drawOffsetX = mapState.drawOffsetX;
-    const drawOffsetY = mapState.drawOffsetY;
     const cW = poseCanvas.width;
     const cH = poseCanvas.height;
+    const scale = Math.min(cW / mapState.info.width, cH / mapState.info.height);
+    const drawOffsetX = (cW - mapState.info.width  * scale) / 2;
+    const drawOffsetY = (cH - mapState.info.height * scale) / 2;
     
     // Apply Pan & Zoom
     poseCtx.translate(cW / 2 + panX, cH / 2 + panY);
     poseCtx.scale(viewScale, viewScale);
     poseCtx.translate(-cW / 2, -cH / 2);
     
-    poseCtx.translate(drawOffsetX + (width * scale) / 2, drawOffsetY + (height * scale) / 2);
-    poseCtx.scale(scale, -scale);
+    // Convert robot position (meters) to pixel in the flipped image.
+    // cy is in ROS coords (Y-up from origin); image row 0 = top = ROS row (height-1).
+    const imgX = cx;
+    const imgY = (height - 1) - cy;  // flip Y to match the pre-flipped image
     
-    poseCtx.translate(cx - width / 2, cy - height / 2);
+    poseCtx.translate(drawOffsetX + imgX * scale, drawOffsetY + imgY * scale);
+    // Canvas Y points down, ROS yaw CCW = canvas CW, so negate.
     poseCtx.rotate(-poseState.yaw);
     
     poseCtx.beginPath();
     poseCtx.moveTo(8, 0);
-    poseCtx.lineTo(-5, 5);
     poseCtx.lineTo(-5, -5);
+    poseCtx.lineTo(-5, 5);
     poseCtx.closePath();
     
     poseCtx.fillStyle = stale ? '#e67e22' : '#e74c3c';
@@ -253,10 +265,11 @@ socket.on('robot_pose', payload => {
 
 socket.on('robot_state', data => {
     const badge = document.getElementById('robot-state-badge');
-    badge.innerText = `State: ${data.data}`;
-    if(data.data === 'IDLE') {
+    const state = (data.data || 'unknown').toUpperCase();
+    badge.innerText = `State: ${state}`;
+    if(state === 'IDLE') {
         badge.className = 'badge badge-grey';
-    } else if(data.data === 'ERROR') {
+    } else if(state === 'ERROR') {
         badge.className = 'badge badge-red';
     } else {
         badge.className = 'badge badge-green';
@@ -337,6 +350,58 @@ window.addEventListener('mousemove', e => {
     renderPoseLayer();
 });
 
+// Click-to-navigate logic
+mapCanvas.addEventListener('click', e => {
+    // If the user was dragging to pan, don't trigger a click
+    if (Math.abs(e.clientX - startDragX - panX) > 5 || Math.abs(e.clientY - startDragY - panY) > 5) {
+        return;
+    }
+    
+    if (!mapState.info) {
+        showToast('No map available to set goal', 'warning');
+        return;
+    }
+
+    const rect = mapCanvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    const width = mapState.info.width;
+    const height = mapState.info.height;
+    const scale = mapState.scale;
+    const drawOffsetX = mapState.drawOffsetX;
+    const drawOffsetY = mapState.drawOffsetY;
+    const cW = mapCanvas.width;
+    const cH = mapCanvas.height;
+
+    // Inverse transform (matches new positive-scale rendering)
+    // 1. Undo pan & zoom
+    const unzoomedX = (clickX - cW / 2 - panX) / viewScale + cW / 2;
+    const unzoomedY = (clickY - cH / 2 - panY) / viewScale + cH / 2;
+
+    // 2. Undo offset and scale → image pixel coordinates
+    const imgPixelX = (unzoomedX - drawOffsetX) / scale;
+    const imgPixelY = (unzoomedY - drawOffsetY) / scale;
+
+    // 3. Convert image pixel to ROS map coordinates
+    // Image was row-flipped: imgPixelY=0 = ROS top row (height-1)
+    const rosCol = imgPixelX;                    // column = X cell
+    const rosRow = height - imgPixelY;           // flip back to ROS Y-up
+
+    const originX = mapState.info.origin?.position?.x ?? 0;
+    const originY = mapState.info.origin?.position?.y ?? 0;
+    const res = mapState.info.resolution;
+
+    const targetX = (rosCol * res) + originX;
+    const targetY = (rosRow * res) + originY;
+
+    // Update input fields
+    document.getElementById('input-x').value = targetX.toFixed(2);
+    document.getElementById('input-y').value = targetY.toFixed(2);
+    
+    // Auto-send goal
+    apiCall('/api/navigation/goal', {x: targetX, y: targetY, theta: 0});
+});
 
 // ── UI Helpers ──────────────────────────────────────────────────────────────
 

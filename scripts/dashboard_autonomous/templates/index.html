@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autonomous Exploration Dashboard</title>
+    <meta name="description" content="BonicBot autonomous exploration test environment — real-time map visualization and control">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.js"></script>
+</head>
+<body class="dark-theme">
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="glass-panel header">
+            <div class="logo">
+                <span class="pulse-dot {% if connected %}active{% endif %}"></span>
+                <h1>BonicBot <span class="accent">AutoExplore</span></h1>
+            </div>
+            <div class="connection-status">
+                {% if connected %}
+                    <span class="badge success">Bridge Connected</span>
+                {% else %}
+                    <span class="badge error">Bridge Disconnected</span>
+                {% endif %}
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="content-grid">
+            <!-- Left Column: Map -->
+            <section class="map-section glass-panel">
+                <div class="section-header">
+                    <h2>Live Map</h2>
+                    <span id="map-status" class="badge">Waiting for data...</span>
+                </div>
+                <div class="map-container">
+                    <canvas id="mapCanvas" width="500" height="500"></canvas>
+                </div>
+            </section>
+
+            <!-- Right Column: Controls & Stats -->
+            <section class="controls-section glass-panel">
+                <div class="section-header">
+                    <h2>Exploration Control</h2>
+                </div>
+
+                <!-- Stats Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <span class="stat-label">Explored Area</span>
+                        <span class="stat-value" id="area-val">0.0 m²</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Status</span>
+                        <span class="stat-value highlight" id="explore-status-val">Idle</span>
+                    </div>
+                </div>
+
+                <!-- Setup Progress Bar -->
+                <div class="progress-section" id="setup-progress-section" style="display:none;">
+                    <div class="progress-header">
+                        <span class="progress-title" id="setup-stage-text">Initializing...</span>
+                        <span class="progress-pct" id="setup-pct-text">0%</span>
+                    </div>
+                    <div class="progress-bar-track">
+                        <div class="progress-bar-fill" id="setup-progress-bar" style="width:0%"></div>
+                    </div>
+                </div>
+
+                <!-- Map Wait Progress Bar -->
+                <div class="progress-section" id="map-progress-section" style="display:none;">
+                    <div class="progress-header">
+                        <span class="progress-title" id="map-stage-text">Mapping...</span>
+                        <span class="progress-pct" id="map-pct-text">0%</span>
+                    </div>
+                    <div class="progress-bar-track">
+                        <div class="progress-bar-fill map-fill" id="map-progress-bar" style="width:0%"></div>
+                    </div>
+                </div>
+
+                <!-- Control Buttons -->
+                <div class="action-buttons">
+                    <button id="btn-setup" class="btn primary">
+                        <span class="icon">🚀</span> Start Autonomous Mapping
+                    </button>
+
+                    <!-- Wait for Map Controls -->
+                    <div class="wait-controls">
+                        <div class="input-group">
+                            <label for="min-area-input">Target area (m²)</label>
+                            <input type="number" id="min-area-input" value="10" min="1" step="1">
+                        </div>
+                        <button id="btn-wait" class="btn secondary" disabled>
+                            <span class="icon">⏳</span> Wait for Map Complete
+                        </button>
+                    </div>
+
+                    <button id="btn-stop" class="btn danger" disabled>
+                        <span class="icon">🛑</span> Stop Exploration
+                    </button>
+                </div>
+
+                <!-- Live Log Panel -->
+                <div class="log-panel">
+                    <div class="section-header compact">
+                        <h3>Activity Log</h3>
+                        <button id="btn-clear-log" class="btn-icon" title="Clear log">✕</button>
+                    </div>
+                    <div class="log-container" id="log-container">
+                        <div class="log-entry info">Dashboard loaded. Ready.</div>
+                    </div>
+                </div>
+
+                <!-- Diagnostics Panel -->
+                <div class="diagnostics-panel">
+                    <h3>System Diagnostics</h3>
+                    <pre id="diag-json">{}</pre>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

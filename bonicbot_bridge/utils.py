@@ -17,6 +17,11 @@ ODOMETRY_MESSAGE_TYPE = "nav_msgs/Odometry"
 CAMERA_INFO_MESSAGE_TYPE = "sensor_msgs/CameraInfo"
 COMPRESSED_IMAGE_MESSAGE_TYPE = "sensor_msgs/CompressedImage"
 JOINT_STATE_MESSAGE_TYPE = "sensor_msgs/JointState"
+OCCUPANCY_GRID_MESSAGE_TYPE = "nav_msgs/OccupancyGrid"
+
+# Mapping-related topics
+MAP_TOPIC = "/map"
+MAP_AVAILABLE_TOPIC = "/robot/map_available"
 
 # Shared navigation service topics (used by both motion.py and system.py)
 START_NAVIGATION_SERVICE = "/robot/start_navigation"
@@ -78,3 +83,77 @@ def safe_unadvertise(publisher):
             publisher.unadvertise()
         except Exception as exc:
             print(f"⚠️ Error unadvertising publisher {getattr(publisher, 'name', 'unknown')}: {exc}")
+
+# ── Odometry topics ───────────────────────────────────────────────────────
+# DIFF_CONT_ODOM_TOPIC is retained as a named constant so its
+# former users are explicit about the frame they are targeting.
+# New code should prefer ODOMETRY_FILTERED_TOPIC (EKF, less drift).
+DIFF_CONT_ODOM_TOPIC           = "/diff_cont/odom"
+ODOMETRY_FILTERED_TOPIC        = "/odometry/filtered"
+
+# ── Robot state & status topics ───────────────────────────────────────────
+ROBOT_STATE_TOPIC              = "/robot/state"
+MAPPING_STATUS_TOPIC           = "/robot/mapping_active"
+NAVIGATION_STATUS_TOPIC        = "/robot/navigation_active"
+CAMERA_STATUS_TOPIC            = "/robot/camera_active"
+CURRENT_GOAL_TOPIC             = "/robot/current_goal"
+DISTANCE_TO_GOAL_TOPIC         = "/robot/distance_to_goal"
+LOCATIONS_LIST_TOPIC           = "/robot/locations_list"
+NAV_STATUS_TOPIC               = "/robot/nav_status"
+EXPLORE_STATUS_TOPIC           = "/robot/explore_active"
+
+# ── Robot action publisher topics ─────────────────────────────────────────
+GOTO_LOCATION_TOPIC            = "/robot/goto_location"
+SAVE_LOCATION_TOPIC            = "/robot/save_location"
+DELETE_LOCATION_TOPIC          = "/robot/delete_location"
+
+# ── Navigation topics ────────────────────────────────────────────────────
+CMD_VEL_TOPIC                  = "/cmd_vel"
+GOAL_POSE_TOPIC                = "/goal_pose"
+INITIAL_POSE_TOPIC             = "/initialpose"
+
+# ── Mapping & costmap topics ─────────────────────────────────────────────
+NAV2_COSTMAP_TOPIC             = "/global_costmap/costmap"
+EXPLORE_FRONTIERS_TOPIC        = "/explore/frontiers"
+
+# ── Mapping services ─────────────────────────────────────────────────────
+START_MAPPING_SERVICE          = "/robot/start_mapping"
+STOP_MAPPING_SERVICE           = "/robot/stop_mapping"
+SAVE_MAP_SERVICE               = "/robot/save_map"
+
+# ── Camera services ──────────────────────────────────────────────────────
+START_CAMERA_SERVICE           = "/robot/start_camera"
+STOP_CAMERA_SERVICE            = "/robot/stop_camera"
+
+# ── Exploration service ──────────────────────────────────────────────────
+START_EXPLORE_SERVICE          = "/robot/start_explore"
+
+# ── Navigation action service ────────────────────────────────────────────
+CANCEL_NAVIGATION_SERVICE      = "/robot/cancel_navigation"
+
+# ── Camera sensor topics ─────────────────────────────────────────────────
+CAMERA_INFO_TOPIC              = "/camera/camera_info"
+COMPRESSED_IMAGE_TOPIC         = "/camera/image_raw/compressed"
+
+# ── Servo / joint controller topics ──────────────────────────────────────
+LEFT_ARM_COMMAND_TOPIC         = "/left_arm_controller/commands"
+RIGHT_ARM_COMMAND_TOPIC        = "/right_arm_controller/commands"
+HEAD_COMMAND_TOPIC             = "/head_controller/commands"
+LEFT_GRIPPER_COMMAND_TOPIC     = "/left_gripper_controller/commands"
+RIGHT_GRIPPER_COMMAND_TOPIC    = "/right_gripper_controller/commands"
+JOINT_STATES_TOPIC             = "/joint_states"
+
+# ── Vision pipeline topics ───────────────────────────────────────────────
+VISION_CONTROL_TOPIC           = "/vision/control"
+VISION_MODE_TOPIC              = "/robot/vision_mode"
+VISION_DETECTIONS_TOPIC        = "/vision/detections"
+VISION_FACES_TOPIC             = "/vision/faces"
+VISION_POSE_TOPIC              = "/vision/pose"
+VISION_GESTURE_TOPIC           = "/vision/gesture"
+VISION_ARUCO_TOPIC             = "/vision/aruco"
+
+# ── Additional message types ─────────────────────────────────────────────
+MARKER_ARRAY_MESSAGE_TYPE      = "visualization_msgs/MarkerArray"
+GOAL_STATUS_ARRAY_MESSAGE_TYPE = "action_msgs/GoalStatusArray"
+# Note: VISION_MESSAGE_TYPE = STRING_MESSAGE_TYPE — do NOT add a duplicate;
+# vision.py must import STRING_MESSAGE_TYPE and use it directly.

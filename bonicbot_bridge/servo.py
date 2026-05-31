@@ -13,16 +13,15 @@ from .exceptions import BonicBotError
 from .utils import (
     FLOAT64_MULTI_ARRAY_MESSAGE_TYPE,
     JOINT_STATE_MESSAGE_TYPE,
+    LEFT_ARM_COMMAND_TOPIC,
+    RIGHT_ARM_COMMAND_TOPIC,
+    HEAD_COMMAND_TOPIC,
+    LEFT_GRIPPER_COMMAND_TOPIC,
+    RIGHT_GRIPPER_COMMAND_TOPIC,
+    JOINT_STATES_TOPIC,
     safe_unadvertise,
     safe_unsubscribe,
 )
-
-LEFT_ARM_COMMAND_TOPIC = "/left_arm_controller/commands"
-RIGHT_ARM_COMMAND_TOPIC = "/right_arm_controller/commands"
-HEAD_COMMAND_TOPIC = "/head_controller/commands"
-LEFT_GRIPPER_COMMAND_TOPIC = "/left_gripper_controller/commands"
-RIGHT_GRIPPER_COMMAND_TOPIC = "/right_gripper_controller/commands"
-JOINT_STATES_TOPIC = "/joint_states"
 
 COMMAND_PUBLISH_DELAY_SECONDS = 0.1
 JOINT_STATE_FEEDBACK_DELAY_SECONDS = 0.5

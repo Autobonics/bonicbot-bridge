@@ -12,6 +12,8 @@ from .exceptions import BonicBotError
 from .utils import (
     CAMERA_INFO_MESSAGE_TYPE,
     COMPRESSED_IMAGE_MESSAGE_TYPE,
+    CAMERA_INFO_TOPIC,
+    COMPRESSED_IMAGE_TOPIC,
     safe_unsubscribe,
 )
 
@@ -31,9 +33,6 @@ except ImportError:
         HAS_PIL = True
     except ImportError:
         HAS_PIL = False
-
-CAMERA_INFO_TOPIC = "/camera/camera_info"
-COMPRESSED_IMAGE_TOPIC = "/camera/image_raw/compressed"
 DEFAULT_CAMERA_INFO_WAIT_SECONDS = 0.3
 DEFAULT_STREAM_THROTTLE_MS = 100
 DEFAULT_IMAGE_WAIT_TIMEOUT_SECONDS = 5.0

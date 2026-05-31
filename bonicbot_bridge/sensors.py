@@ -7,9 +7,7 @@ import time
 
 from roslibpy import Topic
 
-from .utils import ODOMETRY_MESSAGE_TYPE, safe_unsubscribe
-
-ODOMETRY_TOPIC = "/diff_cont/odom"
+from .utils import ODOMETRY_MESSAGE_TYPE, DIFF_CONT_ODOM_TOPIC, safe_unsubscribe
 
 INITIAL_DATA_WAIT_SECONDS = 0.5
 DEFAULT_BATTERY_PERCENT = 85.0
@@ -29,7 +27,7 @@ class SensorManager:
         self._position_sub = None
 
         # Subscribers
-        self.odom_sub = Topic(self.ros, ODOMETRY_TOPIC, ODOMETRY_MESSAGE_TYPE)
+        self.odom_sub = Topic(self.ros, DIFF_CONT_ODOM_TOPIC, ODOMETRY_MESSAGE_TYPE)
 
         # Start subscriptions
         self.odom_sub.subscribe(self._odom_callback)

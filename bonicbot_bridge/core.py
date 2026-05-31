@@ -13,7 +13,7 @@ from .motion import MotionController
 from .sensors import SensorManager
 from .servo import ServoController
 from .system import SystemController
-from .vision import VisionController
+from .vision.vision import VisionController
 from .autonomous import ExploreController
 
 DEFAULT_HOST = "localhost"
@@ -278,6 +278,18 @@ class BonicBot:
     def setup_for_mapping(self):
         """Configure system for mapping. Delegates to: system.setup_for_mapping()"""
         return self.system.setup_for_mapping()
+
+    def has_saved_map(self):
+        """Check if a saved map exists on the robot. Delegates to: system.has_saved_map()"""
+        return self.system.has_saved_map()
+
+    def get_map_info(self):
+        """Get current map metadata (resolution, width, height, origin). Delegates to: system.get_map_info()"""
+        return self.system.get_map_info()
+
+    def get_map_data(self):
+        """Get the full cached OccupancyGrid map data. Delegates to: system.get_map_data()"""
+        return self.system.get_map_data()
 
     def setup_for_navigation(self):
         """Configure system for navigation. Delegates to: system.setup_for_navigation()"""
