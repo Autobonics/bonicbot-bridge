@@ -171,6 +171,7 @@ class ServoController:
             self.left_arm_pub.publish(msg)
             
             # Small delay to ensure message is transmitted
+            import time
             time.sleep(0.1)
             
             # Update internal state
