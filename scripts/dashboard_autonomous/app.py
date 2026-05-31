@@ -21,7 +21,8 @@ from bonicbot_bridge.core import BonicBot
 from bonicbot_bridge.autonomous import ExploreError, ExploreTimeoutError
 
 app = Flask(__name__)
-socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*')
+# Bug 10 fix: Increase max payload size to 50MB to allow large SLAM maps to transmit without dropping the websocket
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*', max_http_buffer_size=50_000_000)
 
 # ── Global State ─────────────────────────────────────────────────────────
 # Tracks which background operation is running so we don't double-start.
@@ -43,6 +44,12 @@ try:
 except Exception as e:
     print(f"⚠️ WARNING: Could not connect to ROS bridge. {e}")
     bot, system, motion, explore = None, None, None, None
+
+# Register explore_lite lifecycle callback to forward events to frontend
+if explore:
+    def _on_lifecycle(status):
+        socketio.emit('explore_lifecycle', {'status': status}, namespace='/')
+    explore.set_lifecycle_callback(_on_lifecycle)
 
 def _shutdown():
     print("🛑 Shutting down Autonomous Dashboard...")

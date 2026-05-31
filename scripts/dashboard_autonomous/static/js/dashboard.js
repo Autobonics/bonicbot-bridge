@@ -114,9 +114,17 @@ socket.on('explore_status', (diag) => {
     // Bug 7 fix: nullish coalescing guard for undefined latest_area_m2
     areaVal.textContent = `${(diag.latest_area_m2 ?? 0).toFixed(2)} m²`;
 
-    if (diag.frontiers_exhausted) {
+    // Use explore_lite lifecycle status for richer state display
+    const lifecycle = diag.explore_lifecycle || '';
+    if (diag.returned_to_init) {
+        exploreStatusVal.textContent = 'Returned ✓';
+        exploreStatusVal.style.color = '#34d399';
+    } else if (diag.frontiers_exhausted) {
         exploreStatusVal.textContent = 'Complete ✓';
         exploreStatusVal.style.color = '#34d399';
+    } else if (lifecycle === 'returning_to_origin') {
+        exploreStatusVal.textContent = 'Returning...';
+        exploreStatusVal.style.color = '#a78bfa';
     } else if (diag.explore_active) {
         exploreStatusVal.textContent = 'Exploring...';
         exploreStatusVal.style.color = '#fbbf24';
@@ -129,6 +137,24 @@ socket.on('explore_status', (diag) => {
     if (!isSettingUp && !isWaiting) {
         updateButtons(diag.explore_active);
     }
+});
+
+// ── SocketIO: explore_lite Lifecycle Events ─────────────────────────────
+
+const LIFECYCLE_LABELS = {
+    'exploration_started': '🚀 Exploration started',
+    'exploration_in_progress': '🗺️ Exploration in progress',
+    'exploration_paused': '⏸️ Exploration paused',
+    'exploration_complete': '✅ All frontiers explored!',
+    'returning_to_origin': '🔙 Returning to initial pose...',
+    'returned_to_origin': '🏠 Returned to initial pose',
+};
+
+socket.on('explore_lifecycle', (data) => {
+    const label = LIFECYCLE_LABELS[data.status] || `📋 ${data.status}`;
+    const type = data.status.includes('complete') || data.status.includes('returned')
+        ? 'success' : 'info';
+    addLog(label, type);
 });
 
 // ── SocketIO: Setup Progress ────────────────────────────────────────────

@@ -101,6 +101,17 @@ DISTANCE_TO_GOAL_TOPIC         = "/robot/distance_to_goal"
 LOCATIONS_LIST_TOPIC           = "/robot/locations_list"
 NAV_STATUS_TOPIC               = "/robot/nav_status"
 EXPLORE_STATUS_TOPIC           = "/robot/explore_active"
+EXPLORE_RESUME_TOPIC           = "/explore/resume"
+EXPLORE_LIFECYCLE_TOPIC        = "/explore/status"
+EXPLORE_STATUS_MESSAGE_TYPE    = "explore_lite_msgs/ExploreStatus"
+
+# explore_lite lifecycle status values (from ExploreStatus.msg)
+EXPLORE_STATUS_STARTED         = "exploration_started"
+EXPLORE_STATUS_IN_PROGRESS     = "exploration_in_progress"
+EXPLORE_STATUS_PAUSED          = "exploration_paused"
+EXPLORE_STATUS_COMPLETE        = "exploration_complete"
+EXPLORE_STATUS_RETURNING       = "returning_to_origin"
+EXPLORE_STATUS_RETURNED        = "returned_to_origin"
 
 # ── Robot action publisher topics ─────────────────────────────────────────
 GOTO_LOCATION_TOPIC            = "/robot/goto_location"
@@ -127,6 +138,7 @@ STOP_CAMERA_SERVICE            = "/robot/stop_camera"
 
 # ── Exploration service ──────────────────────────────────────────────────
 START_EXPLORE_SERVICE          = "/robot/start_explore"
+STOP_EXPLORE_SERVICE           = "/robot/stop_explore"
 
 # ── Navigation action service ────────────────────────────────────────────
 CANCEL_NAVIGATION_SERVICE      = "/robot/cancel_navigation"

@@ -6,7 +6,7 @@
     <title>Autonomous Exploration Dashboard</title>
     <meta name="description" content="BonicBot autonomous exploration test environment — real-time map visualization and control">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=1">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.js"></script>
 </head>
 <body class="dark-theme">
@@ -35,7 +35,9 @@
                     <span id="map-status" class="badge">Waiting for data...</span>
                 </div>
                 <div class="map-container">
-                    <canvas id="mapCanvas" width="500" height="500"></canvas>
+                    <div class="canvas-wrapper" style="position: relative; display: inline-flex;">
+                        <canvas id="mapCanvas" width="500" height="500"></canvas>
+                    </div>
                 </div>
             </section>
 
