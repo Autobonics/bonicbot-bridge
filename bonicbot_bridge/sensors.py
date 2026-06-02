@@ -145,7 +145,7 @@ class SensorManager:
         if self._position_sub:
             self._position_sub.unsubscribe()
 
-        self._position_sub = Topic(self.ros, ODOMETRY_TOPIC, ODOMETRY_MESSAGE_TYPE)
+        self._position_sub = Topic(self.ros, DIFF_CONT_ODOM_TOPIC, ODOMETRY_MESSAGE_TYPE)
         self._position_sub.subscribe(handle_position_update)
 
     def get_sensor_info(self):
