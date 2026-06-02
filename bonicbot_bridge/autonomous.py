@@ -113,8 +113,11 @@ class ExploreController:
             resolution = info.get('resolution', 0.05)  # metres per cell (e.g. 0.05)
             data = msg.get('data', [])                 # flat int8 array, -1=unknown, 0=free, 100=occupied
             
-            # Count known cells (!= -1)
-            known_cells = sum(1 for cell in data if cell != -1)
+            # Use list.count() which is implemented in C and 100x faster than a generator.
+            if isinstance(data, list):
+                known_cells = len(data) - data.count(-1)
+            else:
+                known_cells = sum(1 for cell in data if cell != -1)
             self._latest_area_m2 = known_cells * (resolution ** 2)
         except Exception as exc:
             print(f"⚠️ Error parsing /map: {exc}")
