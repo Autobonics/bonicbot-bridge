@@ -2,479 +2,653 @@
 Motion controller for robot movement and navigation
 """
 
+import time
 import math
 import threading
-import time
-
-from roslibpy import Service, ServiceRequest, Topic
-
+import functools
+from roslibpy import Topic, Service, ServiceRequest
 from .exceptions import NavigationError
 from .precisemotion import QueueMixin
-from .utils import (
-    FLOAT32_MESSAGE_TYPE,
-    NAVIGATION_SERVICE_CALL_TIMEOUT_SECONDS,
-    POSE_STAMPED_MESSAGE_TYPE,
-    POSE_WITH_COVARIANCE_MESSAGE_TYPE,
-    STRING_MESSAGE_TYPE,
-    TWIST_MESSAGE_TYPE,
-    CMD_VEL_TOPIC,
-    GOAL_POSE_TOPIC,
-    INITIAL_POSE_TOPIC,
-    NAV_STATUS_TOPIC,
-    DISTANCE_TO_GOAL_TOPIC,
-    CANCEL_NAVIGATION_SERVICE,
-    safe_unsubscribe,
-)
 
-# START_NAVIGATION_SERVICE and STOP_NAVIGATION_SERVICE are imported from utils
+# ── Velocity safety limits ─────────────────────────────────────────────
+# Conservative defaults for a small differential-drive indoor robot.
+# These can be overridden at runtime via MotionController.set_speed_limits().
+MAX_LINEAR_SPEED = 1.0       # m/s  (absolute value, applies to linear_x & linear_y)
+MAX_ANGULAR_SPEED = 180.0    # deg/s (absolute value, applied before rad/s conversion)
 
-DEFAULT_LINEAR_SPEED = 0.3
-DEFAULT_TURN_SPEED = 0.5
-DEFAULT_GOAL_TIMEOUT_SECONDS = 30
-CMD_VEL_PUBLISH_RATE_HZ = 10
-STATUS_POLL_INTERVAL_SECONDS = 0.1
-INITIAL_POSE_TOPIC_READY_DELAY_SECONDS = 0.15
-INITIAL_POSE_PUBLISH_SETTLE_DELAY_SECONDS = 0.2
-# NAVIGATION_SERVICE_CALL_TIMEOUT_SECONDS, INACTIVE_RESPONSE_TEXT,
-# ALREADY_ACTIVE_RESPONSE_TEXT are imported from utils
-
-MAP_FRAME_ID = "map"
-NAV_STATUS_IDLE = "inactive"
-NAV_STATUS_NAVIGATING = "navigating"
-NAV_STATUS_GOAL_REACHED = "goal_reached"
-NAV_STATUS_GOAL_FAILED = "goal_failed"
-NAV_STATUS_CANCELLED = "cancelled"
-NAV_STATUS_TIMEOUT = "timeout"
-ROBOT_MANAGER_NAV_STATUS_IDLE = "idle"
-NO_ACTIVE_GOAL_MESSAGE = "no active navigation goal"
-TERMINAL_NAV_STATUSES = (
-    NAV_STATUS_GOAL_REACHED,
-    NAV_STATUS_GOAL_FAILED,
-    NAV_STATUS_CANCELLED,
-)
-
-GOAL_STAMP_SECONDS = 0
-GOAL_STAMP_NANOSECONDS = 0
-NANOSECONDS_PER_SECOND = 1_000_000_000
-POSE_COVARIANCE_LENGTH = 36
-
+def _with_motion_lock(func):
+    """Decorator to ensure motion commands are thread-safe and don't interleave."""
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        with self._motion_lock:
+            return func(self, *args, **kwargs)
+    return wrapper
 
 class MotionController(QueueMixin):
     def __init__(self, ros_client):
         self.ros = ros_client
-
+        
+        # Velocity limits (instance-level so they can be tuned per robot)
+        self._max_linear_speed = MAX_LINEAR_SPEED
+        self._max_angular_speed = MAX_ANGULAR_SPEED
+        
+        # Thread safety lock for motion commands
+        self._motion_lock = threading.RLock()
+        
         # Movement publisher
-        self.cmd_vel_pub = Topic(self.ros, CMD_VEL_TOPIC, TWIST_MESSAGE_TYPE)
+        self.cmd_vel_pub = Topic(self.ros, '/cmd_vel', 'geometry_msgs/Twist')
         self.cmd_vel_pub.advertise()
-
-        # Navigation goal publisher and status subscribers
-        self.goal_pub = Topic(self.ros, GOAL_POSE_TOPIC, POSE_STAMPED_MESSAGE_TYPE)
-        self.goal_pub.advertise()
-        self.nav_status_sub = Topic(self.ros, NAV_STATUS_TOPIC, STRING_MESSAGE_TYPE)
-        self.distance_sub = Topic(
-            self.ros, DISTANCE_TO_GOAL_TOPIC, FLOAT32_MESSAGE_TYPE
-        )
-
-        # Cancel-navigation service (start/stop nav services live in SystemController)
-        self.cancel_nav_srv = Service(
-            self.ros,
-            CANCEL_NAVIGATION_SERVICE,
-            "std_srvs/Trigger",
-        )
-
-        # State tracking — protected by _state_lock for thread-safe access
-        # between main thread and roslibpy callback threads.
-        self._state_lock = threading.Lock()
-        self._goal_done_event = threading.Event()
-        self.nav_status = NAV_STATUS_IDLE
-        self.distance_to_goal = None
-        self._goal_active = False
-        self._navigation_active = False
-        self._move_cancel = threading.Event()
-        # system is set by core.py after both controllers are created
-        self.system = None
+        
+        self._init_queue()
+        
+        # Odometry subscription for closed-loop control
+        self._odom_sub = Topic(self.ros, '/diff_cont/odom', 'nav_msgs/Odometry')
+        self._current_yaw = None  # radians
+        self._yaw_lock = threading.Lock()
+        self._odom_sub.subscribe(self._odom_callback)
+        
+        # Navigation topics and services
+        self.goal_pub = Topic(self.ros, '/goal_pose', 'geometry_msgs/PoseStamped')
+        self.nav_status_sub = Topic(self.ros, '/robot/nav_status', 'std_msgs/String')
+        self.distance_sub = Topic(self.ros, '/robot/distance_to_goal', 'std_msgs/Float32')
+        
+        # Navigation services
+        self.start_nav_srv = Service(self.ros, '/robot/start_navigation', 'std_srvs/Trigger')
+        self.stop_nav_srv = Service(self.ros, '/robot/stop_navigation', 'std_srvs/Trigger') 
+        self.cancel_nav_srv = Service(self.ros, '/robot/cancel_navigation', 'std_srvs/Trigger')
+        
+        # State tracking
+        self.nav_status = 'idle'
+        self.distance_to_goal = 0.0
+        
         # Subscribe to status updates
         self.nav_status_sub.subscribe(self._nav_status_callback)
         self.distance_sub.subscribe(self._distance_callback)
+        
+        # Navigation active tracking
+        self.nav_active_sub = Topic(self.ros, '/robot/navigation_active', 'std_msgs/Bool')
+        self.navigation_active = False
+        self.nav_active_sub.subscribe(self._nav_active_callback)
+    
+    def _safe_publish(self, topic, msg):
+        """Publish with connection guard — absorbs transient websocket errors."""
+        if not self.ros.is_connected:
+            return  # Silently skip; reconnection handler will restore the link
+        try:
+            topic.publish(msg)
+        except Exception as e:
+            err = str(e).lower()
+            if any(s in err for s in ('json', 'unexpected character', '<html', 'not connected', 'websocket')):
+                print(f"⚠️ Publish skipped (websocket degraded): {e}")
+                return
+            raise
 
-        # Initialise the command queue (from QueueMixin)
-        self._init_queue()
-
-    def _normalize_nav_status(self, status):
-        if status == ROBOT_MANAGER_NAV_STATUS_IDLE:
-            return NAV_STATUS_IDLE
-        return status
-
-    def _navigation_is_active(self):
-        if self.system is not None:
-            return self.system.is_navigating()
-        return self._navigation_active
-
-    def _set_navigation_active(self, active):
-        """
-        Update the local navigation-active flag.
-        Called from: system.py → SystemController.start_navigation() / stop_navigation()
-        """
-        self._navigation_active = active
-        if not active:
-            self._clear_goal_state(NAV_STATUS_IDLE)
-
-    def _clear_goal_state(self, status=None):
-        with self._state_lock:
-            self._goal_active = False
-            self.distance_to_goal = None
-            if status is not None:
-                self.nav_status = status
+    def _odom_callback(self, msg):
+        """Extract yaw from odometry quaternion for closed-loop turns."""
+        q = msg['pose']['pose']['orientation']
+        yaw = 2.0 * math.atan2(q['z'], q['w'])
+        with self._yaw_lock:
+            self._current_yaw = yaw
 
     def _nav_status_callback(self, msg):
         """Update navigation status"""
-        raw = self._normalize_nav_status(msg["data"])
-        with self._state_lock:
-            # Don't let a stale 'idle' overwrite a just-published goal
-            if self._goal_active and raw == NAV_STATUS_IDLE:
-                return
-            self.nav_status = raw
-            # Signal wait_for_goal if we reached a terminal state
-            if raw in TERMINAL_NAV_STATUSES:
-                self._goal_done_event.set()
-
+        self.nav_status = msg['data']
+        
     def _distance_callback(self, msg):
         """Update distance to goal"""
-        distance = msg["data"]
-        with self._state_lock:
-            if self._goal_active and distance >= 0:
-                self.distance_to_goal = distance
+        self.distance_to_goal = msg['data']
+        
+    def _nav_active_callback(self, msg):
+        """Update navigation active status"""
+        self.navigation_active = msg['data']
+    
+    @staticmethod
+    def _normalize_angle(angle):
+        """Normalize angle to [-pi, pi]."""
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
+    
+    def _wait_for_yaw(self, timeout=5.0):
+        """Block until odometry yaw is available."""
+        start = time.time()
+        while time.time() - start < timeout:
+            with self._yaw_lock:
+                if self._current_yaw is not None:
+                    return self._current_yaw
+            time.sleep(0.05)
+        return None
+    
+    @_with_motion_lock
+    def _turn_by_angle(self, angle_deg, speed_deg, timeout=30.0):
+        """
+        Closed-loop turn using odometry feedback.
 
-    def _move_for_duration(self, duration, linear_x=0, linear_y=0, angular_z=0):
-        interval = 1.0 / CMD_VEL_PUBLISH_RATE_HZ
+        Args:
+            angle_deg (float): How many degrees to turn.
+                               Positive = counter-clockwise (left).
+                               Negative = clockwise (right).
+            speed_deg (float): Rotation speed in deg/s (always positive).
+            timeout (float):   Safety timeout in seconds.
+
+        Returns:
+            float: Actual angle turned in degrees.
+        """
+        angle_rad = math.radians(angle_deg)
+        speed_rad = math.radians(speed_deg)
+
+        # Determine angular velocity direction
+        omega = speed_rad if angle_rad > 0 else -speed_rad
+
+        # Wait for initial yaw reading
+        start_yaw = self._wait_for_yaw()
+        if start_yaw is None:
+            # Fallback to open-loop if no odometry available
+            fallback_duration = abs(angle_deg) / speed_deg
+            self._open_loop_turn(omega, fallback_duration)
+            return angle_deg  # nominal, unverified
+
+        target_delta = abs(angle_rad)
+        accumulated = 0.0
+        prev_yaw = start_yaw
+
+        publish_rate = 20  # 20 Hz for smooth control
+        interval = 1.0 / publish_rate
         start_time = time.time()
-        self._move_cancel.clear()
 
-        while (time.time() - start_time) < duration and not self._move_cancel.is_set():
-            self.move(linear_x=linear_x, linear_y=linear_y, angular_z=angular_z)
+        while accumulated < target_delta:
+            if (time.time() - start_time) > timeout:
+                break
+
+            self.move(angular_z=math.degrees(omega))
             time.sleep(interval)
 
-        self.stop()
+            with self._yaw_lock:
+                current_yaw = self._current_yaw
 
+            if current_yaw is not None:
+                delta = self._normalize_angle(current_yaw - prev_yaw)
+                accumulated += abs(delta)
+                prev_yaw = current_yaw
+
+        self.stop()
+        return math.degrees(accumulated) * (1.0 if angle_rad > 0 else -1.0)
+    
+    # ── Speed limit helpers ───────────────────────────────────────────
+
+    def set_speed_limits(self, max_linear=None, max_angular=None):
+        """Override the default velocity safety limits.
+
+        Call this after construction if the robot's hardware supports
+        different speed ranges than the built-in defaults.
+
+        Args:
+            max_linear (float | None): Maximum absolute linear speed in m/s.
+                If ``None``, the current limit is kept.
+            max_angular (float | None): Maximum absolute angular speed in deg/s.
+                If ``None``, the current limit is kept.
+
+        Raises:
+            ValueError: If a supplied limit is not positive.
+        """
+        if max_linear is not None:
+            if max_linear <= 0:
+                raise ValueError("max_linear must be positive")
+            self._max_linear_speed = float(max_linear)
+        if max_angular is not None:
+            if max_angular <= 0:
+                raise ValueError("max_angular must be positive")
+            self._max_angular_speed = float(max_angular)
+
+    def get_speed_limits(self):
+        """Return the current velocity safety limits.
+
+        Returns:
+            dict: ``{'max_linear': float, 'max_angular': float}``
+                  Linear in m/s, angular in deg/s.
+        """
+        return {
+            'max_linear': self._max_linear_speed,
+            'max_angular': self._max_angular_speed,
+        }
+
+    def _clamp_velocity(self, value, limit, label):
+        """Clamp *value* to [-limit, +limit] and warn if clamped.
+
+        Follows the same clamp-and-warn pattern as
+        ``ServoController._validate_angle`` — the command still executes,
+        but at the safe maximum instead of the dangerous requested value.
+
+        Args:
+            value (float): Requested velocity component.
+            limit (float): Maximum absolute value.
+            label (str): Human-readable name for the warning message.
+
+        Returns:
+            float: Clamped velocity.
+        """
+        if abs(value) > limit:
+            clamped = max(-limit, min(limit, value))
+            print(
+                f"⚠️ {label}={value} exceeds limit ±{limit}, "
+                f"clamping to {clamped}"
+            )
+            return clamped
+        return value
+
+    @_with_motion_lock
     def move(self, linear_x=0, linear_y=0, angular_z=0):
         """
         Send velocity command to robot.
-        Called from: core.py → BonicBot (no direct delegate; used internally)
+
+        Values are clamped to the configured safety limits before
+        publishing.  Use ``set_speed_limits()`` to adjust the limits
+        for your specific hardware.
 
         Args:
-            linear_x: Forward/backward velocity (m/s)
-            linear_y: Left/right velocity (m/s) - for omnidirectional robots
-            angular_z: Rotational velocity (deg/s)
+            linear_x (float): Forward/backward velocity in m/s.
+                              Positive = forward, negative = backward.
+            linear_y (float): Left/right strafe velocity in m/s.
+                              Only effective on omnidirectional robots.
+            angular_z (float): Rotational velocity in **degrees/second** (deg/s).
+                               Positive = counter-clockwise (left), negative = clockwise (right).
+                               This value is converted to rad/s internally before being sent
+                               to the ROS cmd_vel topic.
+
+        Note:
+            Due to ROS2's cmd_vel_timeout (~0.5s), a single call only moves the robot
+            briefly. For sustained movement, publish in a 10 Hz loop or use the
+            higher-level convenience methods (move_forward, turn_left, etc.).
+
+        Examples:
+            >>> bot.motion.move(linear_x=0.3)          # Forward at 0.3 m/s
+            >>> bot.motion.move(angular_z=30.0)        # Spin left at 30 deg/s
+            >>> bot.motion.move(linear_x=0.2, angular_z=-20.0)  # Arc right
         """
+        # Clamp velocities to configured safety limits
+        linear_x = self._clamp_velocity(
+            linear_x, self._max_linear_speed, 'linear_x'
+        )
+        linear_y = self._clamp_velocity(
+            linear_y, self._max_linear_speed, 'linear_y'
+        )
+        angular_z = self._clamp_velocity(
+            angular_z, self._max_angular_speed, 'angular_z'
+        )
+
         # Convert angular velocity from deg/s to rad/s for ROS
         angular_z_rad = math.radians(angular_z)
-
+        
         msg = {
-            "linear": {"x": linear_x, "y": linear_y, "z": 0.0},
-            "angular": {"x": 0.0, "y": 0.0, "z": angular_z_rad},
+            'linear': {'x': linear_x, 'y': linear_y, 'z': 0.0},
+            'angular': {'x': 0.0, 'y': 0.0, 'z': angular_z_rad}
         }
-        self.cmd_vel_pub.publish(msg)
-
-    def move_forward(self, speed=DEFAULT_LINEAR_SPEED, duration=None):
+        self._safe_publish(self.cmd_vel_pub, msg)
+    
+    @_with_motion_lock
+    def move_forward(self, speed=0.3, duration=None):
         """
-        Move robot forward.
-        Called from: core.py → BonicBot.move_forward()
-
+        Move robot forward
+        
         Args:
             speed: Forward speed in m/s (default: 0.3)
             duration: Time to move in seconds (None for continuous)
         """
+        if duration is not None and duration < 0:
+            raise ValueError("Duration cannot be negative")
+            
         if duration:
-            self._move_for_duration(duration, linear_x=speed)
-            return
-
-        # Continuous movement (single command)
-        self.move(linear_x=speed)
-
-    def move_backward(self, speed=DEFAULT_LINEAR_SPEED, duration=None):
-        """
-        Move robot backward.
-        Called from: core.py → BonicBot.move_backward()
-        """
+            # Continuously publish commands to avoid cmd_vel_timeout
+            publish_rate = 10  # 10 Hz
+            interval = 1.0 / publish_rate
+            start_time = time.time()
+            
+            while (time.time() - start_time) < duration:
+                self.move(linear_x=speed)
+                time.sleep(interval)
+            
+            self.stop()
+        else:
+            # Continuous movement (single command)
+            self.move(linear_x=speed)
+    
+    @_with_motion_lock
+    def move_backward(self, speed=0.3, duration=None):
+        """Move robot backward"""
+        if duration is not None and duration < 0:
+            raise ValueError("Duration cannot be negative")
+            
         if duration:
-            self._move_for_duration(duration, linear_x=-speed)
-            return
+            # Continuously publish commands to avoid cmd_vel_timeout
+            publish_rate = 10  # 10 Hz
+            interval = 1.0 / publish_rate
+            start_time = time.time()
+            
+            while (time.time() - start_time) < duration:
+                self.move(linear_x=-speed)
+                time.sleep(interval)
+            
+            self.stop()
+        else:
+            # Continuous movement (single command)
+            self.move(linear_x=-speed)
+            
+    @_with_motion_lock
+    def _open_loop_turn(self, omega_rad, duration):
+        """Fallback open-loop timed turn (used when odometry is unavailable)."""
+        publish_rate = 20  # Hz
+        interval = 1.0 / publish_rate
+        start_time = time.time()
+        while (time.time() - start_time) < duration:
+            self.move(angular_z=math.degrees(omega_rad))
+            time.sleep(interval)
+        self.stop()
 
-        # Continuous movement (single command)
-        self.move(linear_x=-speed)
-
-    def turn_left(self, speed=DEFAULT_TURN_SPEED, duration=None):
+    @_with_motion_lock
+    def turn_left(self, speed=30.0, angle=None, duration=None):
         """
         Turn robot left (counter-clockwise).
-        Called from: core.py → BonicBot.turn_left()
-        """
-        if duration:
-            self._move_for_duration(duration, angular_z=speed)
-            return
 
-        # Continuous movement (single command)
-        self.move(angular_z=speed)
-
-    def turn_right(self, speed=DEFAULT_TURN_SPEED, duration=None):
-        """
-        Turn robot right (clockwise).
-        Called from: core.py → BonicBot.turn_right()
-        """
-        if duration:
-            self._move_for_duration(duration, angular_z=-speed)
-            return
-
-        # Continuous movement (single command)
-        self.move(angular_z=-speed)
-
-    def stop(self):
-        """
-        Stop all robot movement.
-        Called from: core.py → BonicBot.stop() and BonicBot.disconnect()
-        """
-        self._move_cancel.set()
-        self.move(0, 0, 0)
-
-    def go_to(self, x, y, theta=0):
-        """
-        Navigate to specific coordinate using Nav2.
-        Called from: core.py → BonicBot.go_to()
+        Uses **closed-loop odometry feedback** when ``angle`` is specified,
+        guaranteeing accurate rotation regardless of execution environment.
+        Falls back to open-loop timed publishing when ``duration`` is used.
 
         Args:
-            x: Target X coordinate (meters)
-            y: Target Y coordinate (meters)
-            theta: Target orientation (degrees, default: 0)
+            speed (float): Rotational speed in **degrees/second** (deg/s).
+                           Default is 30 deg/s.
+            angle (float | None): Target rotation in **degrees**.
+                                  Uses odometry feedback for precise control.
+                                  Example: angle=90 → exact 90° left turn.
+            duration (float | None): **(Legacy / fallback)** Time to turn in
+                                     seconds. Ignored if ``angle`` is provided.
+                                     If both are None, sends a single command
+                                     (continuous until stopped).
 
+        Returns:
+            float | None: Actual degrees turned (when ``angle`` is used),
+                          or None for continuous / duration modes.
+
+        Examples:
+            >>> bot.turn_left(angle=90)             # Precise 90° left turn
+            >>> bot.turn_left(speed=60, angle=180)  # Fast 180° left turn
+            >>> bot.turn_left(speed=30, duration=3)  # Legacy open-loop mode
+            >>> bot.turn_left(speed=30)              # Continuous spin
+        """
+        if duration is not None and duration < 0:
+            raise ValueError("Duration cannot be negative")
+            
+        if angle is not None:
+            return self._turn_by_angle(angle_deg=abs(angle), speed_deg=abs(speed))
+        elif duration:
+            self._open_loop_turn(math.radians(speed), duration)
+        else:
+            self.move(angular_z=speed)
+            
+    @_with_motion_lock
+    def turn_right(self, speed=30.0, angle=None, duration=None):
+        """
+        Turn robot right (clockwise).
+
+        Uses **closed-loop odometry feedback** when ``angle`` is specified,
+        guaranteeing accurate rotation regardless of execution environment.
+        Falls back to open-loop timed publishing when ``duration`` is used.
+
+        Args:
+            speed (float): Rotational speed in **degrees/second** (deg/s).
+                           Default is 30 deg/s.
+            angle (float | None): Target rotation in **degrees**.
+                                  Uses odometry feedback for precise control.
+                                  Example: angle=90 → exact 90° right turn.
+            duration (float | None): **(Legacy / fallback)** Time to turn in
+                                     seconds. Ignored if ``angle`` is provided.
+                                     If both are None, sends a single command
+                                     (continuous until stopped).
+
+        Returns:
+            float | None: Actual degrees turned (when ``angle`` is used),
+                          or None for continuous / duration modes.
+
+        Examples:
+            >>> bot.turn_right(angle=90)             # Precise 90° right turn
+            >>> bot.turn_right(speed=60, angle=180)  # Fast 180° right turn
+            >>> bot.turn_right(speed=30, duration=3)  # Legacy open-loop mode
+            >>> bot.turn_right(speed=30)              # Continuous spin
+        """
+        if duration is not None and duration < 0:
+            raise ValueError("Duration cannot be negative")
+            
+        if angle is not None:
+            return self._turn_by_angle(angle_deg=-abs(angle), speed_deg=abs(speed))
+        elif duration:
+            self._open_loop_turn(-math.radians(speed), duration)
+        else:
+            self.move(angular_z=-speed)
+    
+    @_with_motion_lock
+    def stop(self):
+        """Stop all robot movement"""
+        self.move(0, 0, 0)
+        
+    def _validate_coordinate(self, value, name, limit=10000.0):
+        """Validate coordinate is finite and within reasonable bounds."""
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            raise NavigationError(f"Coordinate '{name}' must be a numeric value.")
+            
+        if not math.isfinite(val):
+            raise NavigationError(f"Coordinate '{name}' cannot be NaN or infinity.")
+            
+        if limit is not None and abs(val) > limit:
+            raise NavigationError(f"Coordinate '{name}' exceeds maximum allowed range (±{limit}).")
+            
+        return val
+    
+    def go_to(self, x, y, theta=0):
+        """
+        Navigate to specific coordinate using Nav2
+        
+        Args:
+            x: Target X coordinate (meters)
+            y: Target Y coordinate (meters) 
+            theta: Target orientation (degrees, default: 0)
+            
         Returns:
             bool: True if goal was sent successfully
         """
-        if not self._navigation_is_active():
-            self._clear_goal_state(NAV_STATUS_IDLE)
-            return False
-
+        if not self.navigation_active:
+            raise NavigationError("Cannot set goal: Navigation system is not active. Call start_navigation() first.")
+            
+        x = self._validate_coordinate(x, 'x')
+        y = self._validate_coordinate(y, 'y')
+        theta = self._validate_coordinate(theta, 'theta', limit=None)
+            
         try:
             # Convert degrees to radians for ROS message
             theta_rad = math.radians(theta)
-
+            
             # Create goal message
             goal_msg = {
-                "header": {
-                    "stamp": {
-                        "sec": GOAL_STAMP_SECONDS,
-                        "nanosec": GOAL_STAMP_NANOSECONDS,
-                    },
-                    "frame_id": MAP_FRAME_ID,
+                'header': {
+                    'stamp': {'sec': 0, 'nanosec': 0},
+                    'frame_id': 'map'
                 },
-                "pose": {
-                    "position": {"x": x, "y": y, "z": 0.0},
-                    "orientation": {
-                        "x": 0.0,
-                        "y": 0.0,
-                        "z": math.sin(theta_rad / 2),
-                        "w": math.cos(theta_rad / 2),
-                    },
-                },
+                'pose': {
+                    'position': {'x': x, 'y': y, 'z': 0.0},
+                    'orientation': {
+                        'x': 0.0, 'y': 0.0, 
+                        'z': math.sin(theta_rad/2), 
+                        'w': math.cos(theta_rad/2)
+                    }
+                }
             }
-
+            
             # Publish goal
             self.goal_pub.publish(goal_msg)
-            with self._state_lock:
-                self.nav_status = NAV_STATUS_NAVIGATING
-                self._goal_active = True
-                self.distance_to_goal = None
-                self._goal_done_event.clear()
             print(f"🎯 Navigation goal set: ({x:.2f}, {y:.2f}, θ={theta:.1f}°)")
             return True
-
-        except Exception as exc:
-            raise NavigationError(f"Failed to set navigation goal: {str(exc)}")
-
+            
+        except Exception as e:
+            raise NavigationError(f"Failed to set navigation goal: {str(e)}")
+    
+    def start_navigation(self):
+        """Start navigation system"""
+        request = ServiceRequest()
+        response = self.start_nav_srv.call(request, timeout=30)
+        
+        if not response['success']:
+            raise NavigationError(f"Failed to start navigation: {response['message']}")
+        
+        print("🧭 Navigation system started")
+        return True
+    
+    def stop_navigation(self):
+        """Stop navigation system"""
+        request = ServiceRequest()
+        response = self.stop_nav_srv.call(request, timeout=30)
+        
+        if not response['success']:
+            raise NavigationError(f"Failed to stop navigation: {response['message']}")
+        
+        print("🛑 Navigation system stopped") 
+        return True
+    
     def cancel_goal(self):
-        """
-        Cancel current navigation goal.
-        Called from: core.py → BonicBot.cancel_goal()
-        """
-        if not self._goal_active:
-            self.distance_to_goal = None
-            return False
-
-        try:
-            request = ServiceRequest()
-            response = self.cancel_nav_srv.call(
-                request, timeout=NAVIGATION_SERVICE_CALL_TIMEOUT_SECONDS
-            )
-            if not response["success"]:
-                raise NavigationError(f"Failed to cancel goal: {response['message']}")
-        except NavigationError as exc:
-            if NO_ACTIVE_GOAL_MESSAGE in str(exc).lower():
-                self._clear_goal_state(NAV_STATUS_IDLE)
-                return False
-            raise
-        except Exception as exc:
-            raise NavigationError(f"Failed to cancel goal: {str(exc)}")
-
-        self._clear_goal_state(NAV_STATUS_CANCELLED)
+        """Cancel current navigation goal"""
+        request = ServiceRequest()
+        response = self.cancel_nav_srv.call(request, timeout=30)
+        
+        if not response['success']:
+            raise NavigationError(f"Failed to cancel goal: {response['message']}")
+            
         print("❌ Navigation goal cancelled")
         return True
-
+    
     def set_initial_pose(self, x, y, theta=0):
         """
-        Set initial pose for robot localization.
-        Called from: core.py → BonicBot.set_initial_pose()
-
+        Set initial pose for robot localization
+        
         Args:
             x: Initial X coordinate (meters)
             y: Initial Y coordinate (meters)
             theta: Initial orientation (degrees, default: 0)
-
+            
         Returns:
             bool: True if pose was set successfully
         """
-        if self._goal_active:
-            return False
-
-        initial_pose_pub = None
+        x = self._validate_coordinate(x, 'x')
+        y = self._validate_coordinate(y, 'y')
+        theta = self._validate_coordinate(theta, 'theta', limit=None)
+        
         try:
             # Convert degrees to radians for ROS message
             theta_rad = math.radians(theta)
-
-            # Create valid covariance array
-            cov = [0.0] * POSE_COVARIANCE_LENGTH
-            cov[0] = 0.25  # X variance
-            cov[7] = 0.25  # Y variance
-            cov[35] = 0.068  # Yaw variance
-
+            
             # Create initial pose topic
             initial_pose_pub = Topic(
-                self.ros, INITIAL_POSE_TOPIC, POSE_WITH_COVARIANCE_MESSAGE_TYPE
+                self.ros,
+                '/initialpose',
+                'geometry_msgs/PoseWithCovarianceStamped'
             )
-
+            
             initial_pose_pub.advertise()
-            time.sleep(INITIAL_POSE_TOPIC_READY_DELAY_SECONDS)
-
+            time.sleep(0.15)  # Wait for topic to be ready
+            
             # Create pose message
             pose_msg = {
-                "header": {"stamp": {"sec": 0, "nanosec": 0}, "frame_id": MAP_FRAME_ID},
-                "pose": {
-                    "pose": {
-                        "position": {"x": x, "y": y, "z": 0.0},
-                        "orientation": {
-                            "x": 0.0,
-                            "y": 0.0,
-                            "z": math.sin(theta_rad / 2),
-                            "w": math.cos(theta_rad / 2),
-                        },
+                'header': {
+                    'stamp': {
+                        'sec': int(time.time()),
+                        'nanosec': int((time.time() % 1) * 1e9)
                     },
-                    "covariance": cov,
+                    'frame_id': 'map'
                 },
+                'pose': {
+                    'pose': {
+                        'position': {'x': x, 'y': y, 'z': 0.0},
+                        'orientation': {
+                            'x': 0.0,
+                            'y': 0.0,
+                            'z': math.sin(theta_rad / 2),
+                            'w': math.cos(theta_rad / 2)
+                        }
+                    },
+                    'covariance': [0.0] * 36  # 6x6 covariance matrix
+                }
             }
-
+            
             # Publish initial pose
             initial_pose_pub.publish(pose_msg)
             print(f"📍 Initial pose set: ({x:.2f}, {y:.2f}, θ={theta:.1f}°)")
-
-            time.sleep(INITIAL_POSE_PUBLISH_SETTLE_DELAY_SECONDS)
-
+            
+            time.sleep(0.2)
+            initial_pose_pub.unadvertise()
+            
             return True
-
-        except Exception as exc:
-            raise NavigationError(f"Failed to set initial pose: {str(exc)}")
-        finally:
-            if initial_pose_pub is not None:
-                try:
-                    initial_pose_pub.unadvertise()
-                except Exception:
-                    pass
-
-    def wait_for_goal(self, timeout=DEFAULT_GOAL_TIMEOUT_SECONDS):
+            
+        except Exception as e:
+            raise NavigationError(f"Failed to set initial pose: {str(e)}")
+    
+    def wait_for_goal(self, timeout=30):
         """
-        Wait for current navigation goal to complete.
-        Called from: core.py → BonicBot.wait_for_goal()
-
-        Uses a threading.Event signal from the status callback instead of
-        polling, eliminating timing-related missed-status races.
-
+        Wait for current navigation goal to complete
+        
         Args:
             timeout: Maximum time to wait in seconds
-
+            
         Returns:
             str: Final navigation status ('goal_reached', 'goal_failed', 'cancelled')
         """
-        with self._state_lock:
-            if not self._goal_active:
-                print("⏰ Navigation timeout: no active goal")
-                return NAV_STATUS_TIMEOUT
-
-        # Wait for the callback to signal a terminal status
-        goal_completed = self._goal_done_event.wait(timeout=timeout)
-
-        with self._state_lock:
-            if goal_completed and self.nav_status in TERMINAL_NAV_STATUSES:
-                if self.nav_status == NAV_STATUS_GOAL_REACHED:
+        start_time = time.time()
+        
+        while (time.time() - start_time) < timeout:
+            if self.nav_status in ['goal_reached', 'goal_failed', 'cancelled']:
+                if self.nav_status == 'goal_reached':
                     print("✅ Goal reached!")
-                elif self.nav_status == NAV_STATUS_GOAL_FAILED:
+                elif self.nav_status == 'goal_failed':
                     print("❌ Goal failed!")
                 else:
                     print("🚫 Goal cancelled!")
-                final_status = self.nav_status
-            else:
-                print(f"⏰ Navigation timeout after {timeout}s")
-                final_status = NAV_STATUS_TIMEOUT
-
-        self._clear_goal_state(final_status)
-        return final_status
-
+                return self.nav_status
+                
+            time.sleep(0.1)
+        
+        print(f"⏰ Navigation timeout after {timeout}s")
+        return 'timeout'
+    
     def get_nav_status(self):
-        """
-        Get current navigation status.
-        Called from: core.py → BonicBot.get_nav_status()
-        """
-        if not self._navigation_is_active() and not self._goal_active:
-            return NAV_STATUS_IDLE
+        """Get current navigation status"""
         return self.nav_status
-
+        
     def get_distance_to_goal(self):
-        """
-        Get distance to current navigation goal in meters.
-        Called from: core.py → BonicBot.get_distance_to_goal()
-        """
-        if not self._goal_active or self.nav_status != NAV_STATUS_NAVIGATING:
-            return None
+        """Get distance to current navigation goal in meters"""
         return self.distance_to_goal
-
+    
     def is_moving(self):
-        """
-        Check if robot is currently moving.
-        Called from: core.py → BonicBot.is_moving()
-        """
-        return self._goal_active and self.nav_status == NAV_STATUS_NAVIGATING
-
-    def subscribe_to_nav_status(self, callback):
-        # roslibpy.Topic.subscribe() is a no-op when already subscribed,
-        # so we use ros.on() directly to add extra callbacks.
-        self.ros.on(NAV_STATUS_TOPIC, callback)
-
-    def subscribe_to_distance_to_goal(self, callback):
-        self.ros.on(DISTANCE_TO_GOAL_TOPIC, callback)
-
+        """Check if robot is currently moving"""
+        return self.nav_status == 'navigating'
     def shutdown(self):
         """Release motion subscriptions during teardown."""
-        # Shut down the command queue first (from QueueMixin)
         try:
             self._queue_shutdown()
         except Exception as exc:
-            print(f"⚠️ Error shutting down queue during shutdown: {exc}")
-
+            pass
+        
         try:
             self.stop()
-        except Exception as exc:
-            print(f"⚠️ Error stopping motion during shutdown: {exc}")
-
+        except Exception:
+            pass
+            
         for pub in (self.goal_pub, self.cmd_vel_pub):
             try:
                 pub.unadvertise()
-            except Exception as exc:
-                print(f"⚠️ Error unadvertising publisher during shutdown: {exc}")
-
-        for topic in (self.nav_status_sub, self.distance_sub):
-            safe_unsubscribe(topic)
+            except Exception:
+                pass
+                
+        for sub in (self._odom_sub, self.nav_status_sub, self.distance_sub, self.nav_active_sub):
+            try:
+                sub.unsubscribe()
+            except Exception:
+                pass

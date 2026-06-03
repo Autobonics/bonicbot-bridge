@@ -23,19 +23,8 @@ import time
 
 from roslibpy import Topic
 
-from ..exceptions import BonicBotError
-from ..utils import (
-    STRING_MESSAGE_TYPE,
-    VISION_CONTROL_TOPIC,
-    VISION_MODE_TOPIC,
-    VISION_DETECTIONS_TOPIC,
-    VISION_FACES_TOPIC,
-    VISION_POSE_TOPIC,
-    VISION_GESTURE_TOPIC,
-    VISION_ARUCO_TOPIC,
-    safe_unsubscribe,
-    safe_unadvertise,
-)
+from .exceptions import BonicBotError
+from .utils import safe_unsubscribe, safe_unadvertise
 
 # ── Custom exceptions ──────────────────────────────────────────────────
 
@@ -77,8 +66,16 @@ class DetectionMode(enum.Enum):
     NONE = "disable"
 
 
-# ── Module-level timing constants ──────────────────────────────────────
+# ── Module-level topic / message constants ─────────────────────────────
 
+VISION_CONTROL_TOPIC = "/vision/control"
+VISION_MODE_TOPIC = "/robot/vision_mode"
+VISION_DETECTIONS_TOPIC = "/vision/detections"
+VISION_FACES_TOPIC = "/vision/faces"
+VISION_POSE_TOPIC = "/vision/pose"
+VISION_GESTURE_TOPIC = "/vision/gesture"
+VISION_ARUCO_TOPIC = "/vision/aruco"
+VISION_MESSAGE_TYPE = "std_msgs/String"
 DEFAULT_DETECTION_THROTTLE_MS = 100  # 10 Hz over WebSocket
 DEFAULT_DETECTION_TIMEOUT_S = 5.0
 
@@ -110,7 +107,7 @@ class VisionController:
         self._vision_pub = Topic(
             self.ros,
             VISION_CONTROL_TOPIC,
-            STRING_MESSAGE_TYPE,
+            VISION_MESSAGE_TYPE,
         )
         self._vision_pub.advertise()
 
@@ -118,7 +115,7 @@ class VisionController:
         self._vision_mode_sub = Topic(
             self.ros,
             VISION_MODE_TOPIC,
-            STRING_MESSAGE_TYPE,
+            VISION_MESSAGE_TYPE,
         )
         self._vision_mode_sub.subscribe(self._on_vision_mode)
 
@@ -127,7 +124,7 @@ class VisionController:
         self._detections_sub = Topic(
             self.ros,
             VISION_DETECTIONS_TOPIC,
-            STRING_MESSAGE_TYPE,
+            VISION_MESSAGE_TYPE,
             throttle_rate=DEFAULT_DETECTION_THROTTLE_MS,
         )
         self._detections_sub.subscribe(self._on_detections)
@@ -137,7 +134,7 @@ class VisionController:
         self._faces_sub = Topic(
             self.ros,
             VISION_FACES_TOPIC,
-            STRING_MESSAGE_TYPE,
+            VISION_MESSAGE_TYPE,
             throttle_rate=DEFAULT_DETECTION_THROTTLE_MS,
         )
         self._faces_sub.subscribe(self._on_faces)
@@ -147,7 +144,7 @@ class VisionController:
         self._pose_sub = Topic(
             self.ros,
             VISION_POSE_TOPIC,
-            STRING_MESSAGE_TYPE,
+            VISION_MESSAGE_TYPE,
             throttle_rate=DEFAULT_DETECTION_THROTTLE_MS,
         )
         self._pose_sub.subscribe(self._on_pose)
@@ -157,7 +154,7 @@ class VisionController:
         self._gesture_sub = Topic(
             self.ros,
             VISION_GESTURE_TOPIC,
-            STRING_MESSAGE_TYPE,
+            VISION_MESSAGE_TYPE,
             throttle_rate=DEFAULT_DETECTION_THROTTLE_MS,
         )
         self._gesture_sub.subscribe(self._on_gesture)
@@ -171,7 +168,7 @@ class VisionController:
         self._aruco_sub = Topic(
             self.ros,
             VISION_ARUCO_TOPIC,
-            STRING_MESSAGE_TYPE,
+            VISION_MESSAGE_TYPE,
             throttle_rate=0,
         )
         self._aruco_sub.subscribe(self._on_aruco)
