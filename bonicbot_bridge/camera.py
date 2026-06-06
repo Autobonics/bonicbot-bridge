@@ -4,6 +4,8 @@ Camera manager for robot camera streaming and control
 
 import base64
 import time
+import queue
+import threading
 from io import BytesIO
 
 from roslibpy import Topic
@@ -68,6 +70,11 @@ class CameraManager:
         self._latest_image_color_order = None
         self._shutdown_called = False
 
+        # Asynchronous decoding
+        self._decode_queue = queue.Queue(maxsize=2)
+        self._decode_thread = threading.Thread(target=self._decode_worker, daemon=True)
+        self._decode_thread.start()
+
         # Subscribe to camera info
         self.info_sub.subscribe(self._camera_info_callback)
 
@@ -87,56 +94,67 @@ class CameraManager:
 
     def _image_callback(self, msg):
         """
-        Process incoming compressed image
-
-        Args:
-            msg: CompressedImage message from ROS
+        Callback thread: Put raw incoming image bytes into the decode queue.
+        Does not block for decoding.
         """
         try:
-            # Extract image data
             image_data = msg.get("data")
-
             if not image_data:
                 return
 
-            # Handle different data formats
-            if isinstance(image_data, str):
-                # Base64 encoded string
-                image_bytes = base64.b64decode(image_data)
-            elif isinstance(image_data, RAW_IMAGE_DATA_TYPES):
-                # Raw byte array
-                image_bytes = bytes(image_data)
-            else:
-                print(f"⚠️ Unknown image data type: {type(image_data)}")
-                return
-
-            # Decode image
-            if HAS_CV2:
-                # Use OpenCV to decode JPEG
-                nparr = np.frombuffer(image_bytes, np.uint8)
-                image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                self._latest_image_color_order = "BGR"
-            elif HAS_PIL:
-                # Use Pillow to decode JPEG
-                pil_image = Image.open(BytesIO(image_bytes))
-                image = np.array(pil_image)
-                self._latest_image_color_order = "RGB"
-            else:
-                # No decoder available, store raw bytes
-                image = image_bytes
-                self._latest_image_color_order = None
-
-            self.latest_image = image
-
-            # Call user callback if provided
-            if self.user_callback:
-                try:
-                    self.user_callback(image)
-                except Exception as exc:
-                    print(f"⚠️ Error in user callback: {exc}")
+            # Drop frame if decoding queue is full to maintain real-time performance
+            try:
+                self._decode_queue.put_nowait(image_data)
+            except queue.Full:
+                pass
 
         except Exception as exc:
-            print(f"❌ Error processing image: {exc}")
+            print(f"❌ Error queuing image data: {exc}")
+
+    def _decode_worker(self):
+        """
+        Dedicated background thread to decode images and invoke user callbacks.
+        """
+        while True:
+            try:
+                image_data = self._decode_queue.get()
+
+                if self._shutdown_called:
+                    break
+
+                # Handle different data formats
+                if isinstance(image_data, str):
+                    image_bytes = base64.b64decode(image_data)
+                elif isinstance(image_data, RAW_IMAGE_DATA_TYPES):
+                    image_bytes = bytes(image_data)
+                else:
+                    print(f"⚠️ Unknown image data type: {type(image_data)}")
+                    continue
+
+                # Decode image
+                if HAS_CV2:
+                    nparr = np.frombuffer(image_bytes, np.uint8)
+                    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    self._latest_image_color_order = "BGR"
+                elif HAS_PIL:
+                    pil_image = Image.open(BytesIO(image_bytes))
+                    image = np.array(pil_image)
+                    self._latest_image_color_order = "RGB"
+                else:
+                    image = image_bytes
+                    self._latest_image_color_order = None
+
+                self.latest_image = image
+
+                # Call user callback if provided
+                if self.user_callback:
+                    try:
+                        self.user_callback(image)
+                    except Exception as exc:
+                        print(f"⚠️ Error in user callback: {exc}")
+
+            except Exception as exc:
+                print(f"❌ Error in decode worker: {exc}")
 
     def _seed_fallback_frame(self):
         if self.latest_image is not None or not HAS_CV2:

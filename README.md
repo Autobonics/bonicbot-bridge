@@ -60,6 +60,7 @@ with BonicBot() as bot:
 - 🤖 **Servo Control**: Control robot arms, grippers, and neck
 - 🔄 **Real-time Feedback**: Live updates on robot status and goals
 - 🛡️ **Safety Features**: Built-in error handling and connection management
+- 👁️ **Vision & AI Detection**: Object detection, face detection, pose estimation, gesture recognition, and ArUco marker tracking
 - 📚 **Educational Focus**: Designed specifically for STEM learning
 
 ## 📖 API Reference
@@ -811,6 +812,516 @@ with BonicBot() as bot:
     print("Returned to starting position!")
 ```
 
+### Vision & Detection Methods
+
+> **ℹ️ Setup:** Vision inference runs automatically when you call `bot.enable_detection()`. No separate process needed.
+> Install vision dependencies with:
+> ```bash
+> pip install bonicbot-bridge[vision]
+> ```
+
+---
+
+#### Detection Modes
+
+The `DetectionMode` enum defines all available pipeline modes. Import it from:
+
+```python
+from bonicbot_bridge.vision import DetectionMode
+```
+
+| Mode | String | What it detects |
+|------|--------|----------------|
+| `DetectionMode.OBJECT` | `'object'` | 80 COCO classes (person, bottle, chair, etc.) |
+| `DetectionMode.FACE` | `'face'` | Human faces with 5 facial landmarks |
+| `DetectionMode.POSE` | `'pose'` | 17 COCO body keypoints |
+| `DetectionMode.GESTURE` | `'gesture'` | Hand gestures (Thumb_Up, Open_Palm, Victory, etc.) |
+| `DetectionMode.ARUCO` | `'aruco'` | ArUco fiducial markers with full pose (tvec, rvec, distance) |
+| `DetectionMode.YOLO` | `'yolo'` | YOLO with selectable model (yolov8n, yolov8s, etc.) |
+
+> **Note:** `DetectionMode.LINE` is reserved for a future mode and will raise `DetectionModeError` if used.
+
+---
+
+#### `enable_detection(mode, model='yolo26n', **kwargs)`
+
+Enable a vision detection pipeline mode.
+
+**Parameters:**
+- `mode` (DetectionMode): The detection mode to enable
+- `model` (str): YOLO model name (default: `'yolo26n'`). Only used when `mode` is `DetectionMode.YOLO`
+- `dictionary` (str): ArUco dictionary name. Only used when `mode` is `DetectionMode.ARUCO`
+
+**Supported ArUco dictionaries:** `DICT_4X4_50`, `DICT_4X4_100`, `DICT_4X4_250`, `DICT_5X5_50`, `DICT_6X6_50`
+
+**Returns:** `True` on successful publish
+
+**Raises:**
+- `DetectionModeError` if `mode` is not a valid `DetectionMode` enum member, is `DetectionMode.NONE`, or is `DetectionMode.LINE`
+- `VisionError` if the publish call fails
+
+```python
+from bonicbot_bridge.vision import DetectionMode
+
+# Object detection (80 COCO classes)
+bot.enable_detection(DetectionMode.OBJECT)
+
+# Face detection
+bot.enable_detection(DetectionMode.FACE)
+
+# Pose estimation
+bot.enable_detection(DetectionMode.POSE)
+
+# Gesture recognition
+bot.enable_detection(DetectionMode.GESTURE)
+
+# ArUco marker tracking with specific dictionary
+bot.enable_detection(DetectionMode.ARUCO, dictionary='DICT_4X4_50')
+
+# YOLO with model selection
+bot.enable_detection(DetectionMode.YOLO, model='yolov8s')
+```
+
+---
+
+#### `disable_detection()`
+
+Disable the vision detection pipeline.
+
+**Returns:** `True` on successful publish
+
+```python
+bot.disable_detection()
+```
+
+---
+
+#### `get_active_mode()`
+
+Return the currently active vision mode string.
+
+**Returns:** `str` — the active mode (e.g. `'face'`, `'object'`, `'disable'`, or `'unknown'` before the first message arrives)
+
+```python
+mode = bot.get_active_mode()
+print(f"Current mode: {mode}")
+```
+
+---
+
+#### `get_detections(class_filter=None)`
+
+Return the latest detection results from the vision pipeline.
+
+**Parameters:**
+- `class_filter` (str | None): If given, return only detections where `class` matches. If `None`, return all detections
+
+**Returns:** `list[dict]` — each dict has the schema:
+
+```python
+{
+    'class':      str,    # e.g. 'person', 'bottle'
+    'confidence': float,  # 0.0–1.0
+    'bbox':       [x, y, w, h],  # pixels, top-left origin
+    'center_x':   float,  # pixels
+    'center_y':   float   # pixels
+}
+```
+
+```python
+# Get all detections
+all_dets = bot.get_detections()
+for det in all_dets:
+    print(f"{det['class']}: {det['confidence']:.2f}")
+
+# Filter by class
+people = bot.get_detections(class_filter='person')
+print(f"Found {len(people)} people")
+```
+
+---
+
+#### `wait_for_detection(target_class, timeout=5.0)`
+
+Block until a detection of `target_class` appears, or timeout.
+
+**Parameters:**
+- `target_class` (str): The class name to look for (e.g. `'person'`, `'bottle'`, `'cat'`)
+- `timeout` (float): Maximum seconds to wait (default: `5.0`)
+
+**Returns:** `dict | None` — the first matching detection dict, or `None` on timeout
+
+```python
+# Wait for a bottle to appear
+bottle = bot.wait_for_detection('bottle', timeout=10.0)
+if bottle:
+    print(f"Bottle found at ({bottle['center_x']}, {bottle['center_y']})")
+else:
+    print("No bottle detected")
+```
+
+---
+
+#### `get_faces()`
+
+Return the latest face detections.
+
+**Returns:** `list[dict]` — each dict has the schema:
+
+```python
+{
+    'bbox': [x, y, w, h],
+    'confidence': float,
+    'landmarks': {
+        'nose':      [x, y],
+        'left_eye':  [x, y],
+        'right_eye': [x, y],
+        'left_ear':  [x, y],
+        'right_ear': [x, y]
+    }
+}
+```
+
+```python
+faces = bot.get_faces()
+for face in faces:
+    print(f"Face confidence: {face['confidence']:.2f}")
+    print(f"Nose position: {face['landmarks']['nose']}")
+```
+
+---
+
+#### `wait_for_face(timeout=5.0)`
+
+Block until any face is detected, or timeout.
+
+**Parameters:**
+- `timeout` (float): Maximum seconds to wait (default: `5.0`)
+
+**Returns:** `dict | None` — the first face dict, or `None` on timeout
+
+```python
+face = bot.wait_for_face(timeout=10.0)
+if face:
+    print(f"Face detected! Confidence: {face['confidence']:.2f}")
+```
+
+---
+
+#### `get_pose_keypoints()`
+
+Return the latest pose keypoints (17 COCO keypoints).
+
+**Returns:** `dict` — each key is a keypoint name, each value has the schema:
+
+```python
+{
+    'nose':           {'x': int, 'y': int, 'confidence': float},
+    'left_shoulder':  {'x': int, 'y': int, 'confidence': float},
+    'right_shoulder': {'x': int, 'y': int, 'confidence': float},
+    'left_elbow':     {'x': int, 'y': int, 'confidence': float},
+    'right_elbow':    {'x': int, 'y': int, 'confidence': float},
+    # ... 17 COCO keypoints total, absolute pixel coordinates
+}
+```
+
+```python
+keypoints = bot.get_pose_keypoints()
+if keypoints:
+    nose = keypoints['nose']
+    print(f"Nose at ({nose['x']}, {nose['y']}), conf: {nose['confidence']:.2f}")
+```
+
+---
+
+#### `wait_for_pose(timeout=5.0)`
+
+Block until pose keypoints are detected, or timeout.
+
+**Parameters:**
+- `timeout` (float): Maximum seconds to wait (default: `5.0`)
+
+**Returns:** `dict | None` — the full keypoints dict, or `None` on timeout
+
+```python
+pose = bot.wait_for_pose(timeout=10.0)
+if pose:
+    print(f"Detected {len(pose)} keypoints")
+```
+
+---
+
+#### `get_gesture()`
+
+Return the current gesture class name, or `None` if no hand is detected.
+
+**Returns:** `str | None`
+
+**Valid gesture names:** `Thumb_Up`, `Thumb_Down`, `Open_Palm`, `Pointing_Up`, `Victory`, `ILoveYou`
+
+```python
+gesture = bot.get_gesture()
+if gesture:
+    print(f"Gesture: {gesture}")
+```
+
+---
+
+#### `get_gesture_full()`
+
+Return the full gesture result including hand landmarks.
+
+**Returns:** `dict` with the schema:
+
+```python
+{
+    'gesture':        str,    # e.g. 'Thumb_Up'
+    'confidence':     float,  # 0.0–1.0
+    'handedness':     str,    # 'Left' or 'Right'
+    'hand_landmarks': [       # 21 MediaPipe hand landmarks
+        {'name': str, 'x': int, 'y': int},
+        ...
+    ]
+}
+```
+
+Returns `{}` if no hand is detected.
+
+```python
+result = bot.get_gesture_full()
+if result:
+    print(f"{result['gesture']} ({result['handedness']} hand, {result['confidence']:.2f})")
+```
+
+---
+
+#### `wait_for_gesture(gesture_name, timeout=5.0)`
+
+Block until a specific gesture is detected, or timeout. Matching is case-insensitive.
+
+**Parameters:**
+- `gesture_name` (str): The gesture name to wait for (e.g. `'Thumb_Up'`)
+- `timeout` (float): Maximum seconds to wait (default: `5.0`)
+
+**Returns:** `dict | None` — the full gesture dict (same schema as `get_gesture_full()`), or `None` on timeout
+
+```python
+# Wait for a thumbs up
+result = bot.wait_for_gesture('Thumb_Up', timeout=10.0)
+if result:
+    print(f"Thumbs up from {result['handedness']} hand!")
+```
+
+---
+
+#### `get_aruco_markers()`
+
+Return the latest ArUco marker detections.
+
+**Returns:** `list[dict]` — each dict has the schema:
+
+```python
+{
+    'id':         int,
+    'corners':    [[x, y], [x, y], [x, y], [x, y]],  # 4 corner points
+    'center_x':   float,
+    'center_y':   float,
+    'calibrated': bool,    # False = approximate intrinsics, distance is estimated
+    'tvec':       [tx, ty, tz],  # translation in meters, Z-axis points forward
+    'rvec':       [rx, ry, rz],  # rotation vector (Rodrigues)
+    'distance_m': float          # distance to marker in meters
+}
+```
+
+> **Note:** When `calibrated` is `False`, approximate camera intrinsics were used — the `distance_m` and `tvec` values are estimates. The `tvec` Z-axis points forward from the marker.
+
+```python
+markers = bot.get_aruco_markers()
+for m in markers:
+    print(f"Marker #{m['id']}: {m['distance_m']:.2f}m away")
+```
+
+---
+
+#### `wait_for_marker(marker_id, timeout=5.0)`
+
+Block until a specific ArUco marker ID is detected, or timeout.
+
+**Parameters:**
+- `marker_id` (int): The integer marker ID to look for
+- `timeout` (float): Maximum seconds to wait (default: `5.0`)
+
+**Returns:** `dict | None` — the matching marker dict, or `None` on timeout
+
+```python
+marker = bot.wait_for_marker(marker_id=1, timeout=10.0)
+if marker:
+    print(f"Marker 1 found at {marker['distance_m']:.2f}m")
+```
+
+---
+
+### Vision Examples
+
+#### Example A: Object Detection Loop
+
+```python
+from bonicbot_bridge import BonicBot
+from bonicbot_bridge.vision.vision import DetectionMode
+import time
+
+with BonicBot() as bot:
+    # Activate camera and enable object detection
+    bot.system.start_camera()
+    bot.enable_detection(DetectionMode.OBJECT)
+    time.sleep(1)  # Allow pipeline to initialize
+
+    # Print detections for 10 seconds
+    start = time.time()
+    while (time.time() - start) < 10:
+        detections = bot.get_detections()
+        for det in detections:
+            print(f"  {det['class']}: {det['confidence']:.2f} at ({det['center_x']}, {det['center_y']})")
+        time.sleep(0.5)
+
+    # Clean up
+    bot.disable_detection()
+    bot.system.stop_camera()
+```
+
+#### Example B: Face-Triggered Wave
+
+```python
+from bonicbot_bridge import BonicBot
+from bonicbot_bridge.vision.vision import DetectionMode
+import time
+
+with BonicBot() as bot:
+    bot.system.start_camera()
+    bot.enable_detection(DetectionMode.FACE)
+    time.sleep(1)
+
+    print("Waiting for a face...")
+    face = bot.wait_for_face(timeout=10.0)
+
+    if face:
+        print(f"Face found! Confidence: {face['confidence']:.2f}")
+        # Wave hello
+        bot.move_left_arm(90, 30)
+        time.sleep(1)
+        bot.move_left_arm(0, 0)
+    else:
+        print("No face detected in time")
+
+    bot.disable_detection()
+    bot.system.stop_camera()
+```
+
+#### Example C: Gesture-Controlled Movement
+
+```python
+from bonicbot_bridge import BonicBot
+from bonicbot_bridge.vision.vision import DetectionMode
+import time
+
+with BonicBot() as bot:
+    bot.system.start_camera()
+    bot.enable_detection(DetectionMode.GESTURE)
+    time.sleep(1)
+
+    print("Gesture control active! Show your hand...")
+    print("  Thumb_Up    = forward")
+    print("  Thumb_Down  = backward")
+    print("  Open_Palm   = stop")
+
+    start = time.time()
+    while (time.time() - start) < 30:  # Run for 30 seconds
+        gesture = bot.get_gesture()
+
+        if gesture == 'Thumb_Up':
+            bot.move_forward(0.3, duration=1.0)
+        elif gesture == 'Thumb_Down':
+            bot.move_backward(0.3, duration=1.0)
+        elif gesture == 'Open_Palm':
+            bot.stop()
+
+        time.sleep(0.2)
+
+    bot.stop()
+    bot.disable_detection()
+    bot.system.stop_camera()
+```
+
+#### Example D: ArUco Docking
+
+```python
+from bonicbot_bridge import BonicBot
+from bonicbot_bridge.vision.vision import DetectionMode
+
+with BonicBot() as bot:
+    bot.system.start_camera()
+    bot.enable_detection(DetectionMode.ARUCO, dictionary='DICT_4X4_50')
+
+    print("Looking for marker #1...")
+    marker = bot.wait_for_marker(marker_id=1, timeout=15.0)
+
+    if marker:
+        distance = marker['distance_m']
+        center_x = marker['center_x']
+        print(f"Marker #1 found: {distance:.2f}m away")
+        print(f"Horizontal position: {center_x:.0f}px from left edge")
+
+        # Simple bearing: if center_x < 320, marker is to the left
+        if center_x < 280:
+            print("Marker is to the LEFT")
+        elif center_x > 360:
+            print("Marker is to the RIGHT")
+        else:
+            print("Marker is CENTERED")
+    else:
+        print("Marker #1 not found")
+
+    bot.disable_detection()
+    bot.system.stop_camera()
+```
+
+#### Example E: Pose-Based Interaction
+
+```python
+from bonicbot_bridge import BonicBot
+from bonicbot_bridge.vision.vision import DetectionMode
+import time
+
+IMAGE_CENTER_X = 320  # Assuming 640px wide image
+
+with BonicBot() as bot:
+    bot.system.start_camera()
+    bot.enable_detection(DetectionMode.POSE)
+    time.sleep(1)
+
+    print("Stand in front of the camera — robot will follow your nose!")
+    pose = bot.wait_for_pose(timeout=10.0)
+
+    if pose:
+        nose = pose['nose']
+        nose_x = nose['x']
+        print(f"Nose at x={nose_x}")
+
+        if nose_x < IMAGE_CENTER_X - 50:
+            print("You're on the LEFT — turning left")
+            bot.turn_left(0.3, duration=0.5)
+        elif nose_x > IMAGE_CENTER_X + 50:
+            print("You're on the RIGHT — turning right")
+            bot.turn_right(0.3, duration=0.5)
+        else:
+            print("You're CENTERED — staying put")
+    else:
+        print("No pose detected")
+
+    bot.disable_detection()
+    bot.system.stop_camera()
+```
+
 ## 🔧 Advanced Usage
 
 ### Custom Callbacks
@@ -911,6 +1422,13 @@ The library communicates with these ROS2 topics and services:
 - `/camera/image_raw/compressed` (sensor_msgs/CompressedImage) - Camera images
 - `/camera/camera_info` (sensor_msgs/CameraInfo) - Camera metadata
 - `/robot/camera_active` (std_msgs/Bool) - Camera status
+- `/vision/control` (std_msgs/String) - Vision mode commands (published by SDK)
+- `/vision/detections` (std_msgs/String) - JSON array of YOLO/object detections
+- `/vision/faces` (std_msgs/String) - JSON array of face detections
+- `/vision/pose` (std_msgs/String) - JSON dict of pose keypoints
+- `/vision/gesture` (std_msgs/String) - JSON dict of gesture result
+- `/vision/aruco` (std_msgs/String) - JSON array of ArUco marker detections
+- `/robot/vision_mode` (std_msgs/String) - Currently active vision mode (subscribed by SDK)
 
 **Services:**
 
@@ -961,6 +1479,13 @@ ModuleNotFoundError: No module named 'bonicbot_bridge'
 
 - Install the library: `pip install bonicbot-bridge`
 - For development: `pip install -e .` from the source directory
+
+**Vision Detection Returns Empty Results**
+
+- Ensure vision dependencies are installed: `pip install bonicbot-bridge[vision]`
+- Confirm camera is streaming: `bot.system.start_camera()` must be called first
+- Check the active mode: `print(bot.get_active_mode())` — should match the mode you enabled
+- For ArUco: confirm the physical marker dictionary matches the `dictionary=` kwarg
 
 ### Debug Mode
 
