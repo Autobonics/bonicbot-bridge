@@ -17,11 +17,6 @@ ODOMETRY_MESSAGE_TYPE = "nav_msgs/Odometry"
 CAMERA_INFO_MESSAGE_TYPE = "sensor_msgs/CameraInfo"
 COMPRESSED_IMAGE_MESSAGE_TYPE = "sensor_msgs/CompressedImage"
 JOINT_STATE_MESSAGE_TYPE = "sensor_msgs/JointState"
-OCCUPANCY_GRID_MESSAGE_TYPE = "nav_msgs/OccupancyGrid"
-
-# Mapping-related topics
-MAP_TOPIC = "/map"
-MAP_AVAILABLE_TOPIC = "/robot/map_available"
 
 # Shared navigation service topics (used by both motion.py and system.py)
 START_NAVIGATION_SERVICE = "/robot/start_navigation"

@@ -19,12 +19,15 @@ pip install bonicbot-bridge
 ```python
 from bonicbot_bridge import BonicBot
 
-# Connect to robot (automatically finds robot on network)
+# Connect to robot (defaults to localhost)
 bot = BonicBot()
+
+# Or connect to a remote robot by IP/hostname
+# bot = BonicBot(host='192.168.1.100')
 
 # Basic movement
 bot.move_forward(speed=0.3, duration=2)
-bot.turn_left(speed=0.5, duration=1)
+bot.turn_left(speed=30.0, duration=1)
 bot.stop()
 
 # Sensors
@@ -45,7 +48,7 @@ bot.disconnect()
 ```python
 with BonicBot() as bot:
     bot.move_forward(0.3, duration=2)
-    bot.turn_right(0.5, duration=1)
+    bot.turn_right(30.0, duration=1)
     # Automatically disconnects when done
 ```
 
@@ -99,7 +102,7 @@ Low-level velocity control for custom robot movement patterns. This method gives
 **Parameters:**
 - `linear_x` (float): Forward/backward velocity in m/s
 - `linear_y` (float): Left/right velocity in m/s (for omnidirectional robots)
-- `angular_z` (float): Rotational velocity in deg/s
+- `angular_z` (float): Rotational velocity in **deg/s** (converted internally to rad/s for ROS)
 
 **⚠️ Important**: Due to ROS2's `cmd_vel_timeout` (typically 0.5s), commands must be **continuously published** to maintain movement. For duration-based control, publish in a loop at 10Hz.
 
@@ -112,7 +115,7 @@ bot.motion.move(linear_x=0.3)
 bot.stop()  # Stop when done
 
 # Pure rotation (spin in place)
-bot.motion.move(angular_z=30.0)  # 30 deg/s
+bot.motion.move(angular_z=30.0)  # 30 deg/s counter-clockwise
 # ... robot spins
 bot.stop()
 ```
@@ -138,7 +141,7 @@ bot.stop()
 # Circular arc (forward + rotation)
 start = time.time()
 while (time.time() - start) < 5.0:
-    bot.motion.move(linear_x=0.2, angular_z=20.0)  # Drive in circle
+    bot.motion.move(linear_x=0.2, angular_z=20.0)  # Drive in circle (20 deg/s)
     time.sleep(0.1)
 bot.stop()
 
@@ -146,13 +149,13 @@ bot.stop()
 # Left arc
 start = time.time()
 while (time.time() - start) < 2.5:
-    bot.motion.move(linear_x=0.2, angular_z=30.0)
+    bot.motion.move(linear_x=0.2, angular_z=30.0)   # 30 deg/s left
     time.sleep(0.1)
 
 # Right arc
 start = time.time()
 while (time.time() - start) < 2.5:
-    bot.motion.move(linear_x=0.2, angular_z=-30.0)
+    bot.motion.move(linear_x=0.2, angular_z=-30.0)  # 30 deg/s right
     time.sleep(0.1)
 
 bot.stop()
@@ -181,16 +184,24 @@ bot.move_backward(0.2, 1.5)     # Move backward for 1.5 seconds
 
 Turn robot left (counter-clockwise).
 
+`speed` is in **degrees/second (deg/s)**. The `move()` method converts this to rad/s before publishing to ROS. Rotation achieved ≈ `speed × duration` degrees.
+
 ```python
-bot.turn_left(0.5, 1.0)         # Turn left for 1 second
+bot.turn_left(30.0, 3.0)        # Turn left ~90° (30 deg/s × 3s)
+bot.turn_left(57.0, 1.6)        # Turn left ~90° (57 deg/s × 1.6s)
+bot.turn_left(30.0)             # Spin left continuously at 30 deg/s
 ```
 
 #### `turn_right(speed, duration=None)`
 
 Turn robot right (clockwise).
 
+`speed` is in **degrees/second (deg/s)**. The `move()` method converts this to rad/s before publishing to ROS. Rotation achieved ≈ `speed × duration` degrees.
+
 ```python
-bot.turn_right(0.5, 1.0)        # Turn right for 1 second
+bot.turn_right(30.0, 3.0)       # Turn right ~90° (30 deg/s × 3s)
+bot.turn_right(57.0, 1.6)       # Turn right ~90° (57 deg/s × 1.6s)
+bot.turn_right(30.0)            # Spin right continuously at 30 deg/s
 ```
 
 #### `stop()`
@@ -705,9 +716,9 @@ with BonicBot() as bot:
     print("Drawing a square...")
 
     for i in range(4):
-        bot.move_forward(0.3, duration=2)   # Move forward
-        bot.turn_left(0.5, duration=1.6)    # Turn 90 degrees
-        time.sleep(0.5)                     # Pause between moves
+        bot.move_forward(0.3, duration=2)   # Move forward 0.6 m
+        bot.turn_left(57.0, duration=1.6)   # Turn ~90° (57 deg/s × 1.6s)
+        time.sleep(0.5)                      # Pause between moves
 
     print("Square complete!")
 ```
@@ -793,9 +804,9 @@ with BonicBot() as bot:
         if move_type == 'forward':
             bot.move_forward(0.3, duration)
         elif move_type == 'left':
-            bot.turn_left(0.5, duration)
+            bot.turn_left(57.0, duration)
         elif move_type == 'right':
-            bot.turn_right(0.5, duration)
+            bot.turn_right(57.0, duration)
 
         time.sleep(1)  # Pause between moves
 
@@ -1354,14 +1365,14 @@ bot.sensors.subscribe_to_position(position_callback)
 ### Error Handling
 
 ```python
-from bonicbot_bridge import BonicBot, ConnectionError, NavigationError
+from bonicbot_bridge import BonicBot, BonicConnectionError, NavigationError
 
 try:
     with BonicBot(host='192.168.1.100') as bot:
         bot.start_navigation()
         bot.go_to(5, 5)
 
-except ConnectionError as e:
+except BonicConnectionError as e:
     print(f"Could not connect to robot: {e}")
 
 except NavigationError as e:
@@ -1433,7 +1444,11 @@ The library communicates with these ROS2 topics and services:
 - `/robot/nav_status` (std_msgs/String) - Navigation status updates
 - `/robot/distance_to_goal` (std_msgs/Float32) - Distance feedback
 - `/joint_states` (sensor_msgs/JointState) - Servo position feedback
-- `/servo_position_controller/commands` (std_msgs/Float64MultiArray) - Servo commands
+- `/left_arm_controller/commands` (std_msgs/Float64MultiArray) - Left arm commands
+- `/right_arm_controller/commands` (std_msgs/Float64MultiArray) - Right arm commands
+- `/head_controller/commands` (std_msgs/Float64MultiArray) - Head/neck commands
+- `/left_gripper_controller/commands` (std_msgs/Float64MultiArray) - Left gripper commands
+- `/right_gripper_controller/commands` (std_msgs/Float64MultiArray) - Right gripper commands
 - `/camera/image_raw/compressed` (sensor_msgs/CompressedImage) - Camera images
 - `/camera/camera_info` (sensor_msgs/CameraInfo) - Camera metadata
 - `/robot/camera_active` (std_msgs/Bool) - Camera status
@@ -1474,7 +1489,7 @@ The library communicates with these ROS2 topics and services:
 **Connection Failed**
 
 ```
-ConnectionError: Failed to connect to robot at localhost:9090
+BonicConnectionError: Failed to connect to robot at localhost:9090
 ```
 
 - Ensure rosbridge_server is running: `ros2 launch rosbridge_server rosbridge_websocket_launch.xml`

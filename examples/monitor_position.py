@@ -22,10 +22,10 @@ def format_position(pos):
     
     x = pos.get('x', 0.0)
     y = pos.get('y', 0.0)
-    theta = pos.get('theta', 0.0)
-    theta_deg = math.degrees(theta)
+    theta_deg = pos.get('theta', 0.0)
+    theta_rad = math.radians(theta_deg)
     
-    return f"X: {x:>7.3f}m  |  Y: {y:>7.3f}m  |  θ: {theta:>6.3f} rad ({theta_deg:>7.2f}°)"
+    return f"X: {x:>7.3f}m  |  Y: {y:>7.3f}m  |  θ: {theta_rad:>6.3f} rad ({theta_deg:>7.2f}°)"
 
 def print_position_display(bot, start_pos=None):
     """Print formatted position display"""
@@ -48,7 +48,9 @@ def print_position_display(bot, start_pos=None):
         print("📊 COMPONENTS:")
         print(f"   X:     {pos['x']:>10.4f} m")
         print(f"   Y:     {pos['y']:>10.4f} m")
-        print(f"   Theta: {pos['theta']:>10.4f} rad ({math.degrees(pos['theta']):>8.2f}°)")
+        theta_deg = pos['theta']
+        theta_rad = math.radians(theta_deg)
+        print(f"   Theta: {theta_rad:>10.4f} rad ({theta_deg:>8.2f}°)")
         print()
         
         # Distance from start
