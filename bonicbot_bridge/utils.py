@@ -157,12 +157,18 @@ JOINT_STATES_TOPIC             = "/joint_states"
 
 # ── Vision pipeline topics ───────────────────────────────────────────────
 VISION_CONTROL_TOPIC           = "/vision/control"
-VISION_MODE_TOPIC              = "/robot/vision_mode"
-VISION_DETECTIONS_TOPIC        = "/vision/detections"
-VISION_FACES_TOPIC             = "/vision/faces"
-VISION_POSE_TOPIC              = "/vision/pose"
-VISION_GESTURE_TOPIC           = "/vision/gesture"
-VISION_ARUCO_TOPIC             = "/vision/aruco"
+VISION_DETECTIONS_TOPIC        = "/vision/yolo_detections"
+VISION_FACES_TOPIC             = "/vision/face_detections"
+VISION_POSE_TOPIC              = "/vision/pose_landmarks"
+VISION_GESTURE_TOPIC           = "/vision/gestures"
+VISION_ARUCO_TOPIC             = "/vision/aruco_ids"
+
+# ── Vision active status topics (Bool) ───────────────────────────────────
+VISION_YOLO_ACTIVE_TOPIC       = "/vision/yolo_active"
+VISION_POSE_ACTIVE_TOPIC       = "/vision/pose_active"
+VISION_FACE_ACTIVE_TOPIC       = "/vision/face_active"
+VISION_GESTURE_ACTIVE_TOPIC    = "/vision/gesture_active"
+VISION_ARUCO_ACTIVE_TOPIC      = "/vision/aruco_active"
 
 # ── Additional message types ─────────────────────────────────────────────
 MARKER_ARRAY_MESSAGE_TYPE      = "visualization_msgs/MarkerArray"
