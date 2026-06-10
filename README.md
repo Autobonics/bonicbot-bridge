@@ -814,11 +814,7 @@ with BonicBot() as bot:
 
 ### Vision & Detection Methods
 
-> **ℹ️ Setup:** Vision inference runs automatically when you call `bot.enable_detection()`. No separate process needed.
-> Install vision dependencies with:
-> ```bash
-> pip install bonicbot-bridge[vision]
-> ```
+> **ℹ️ Architecture:** All vision inference runs on the robot's onboard `vision_pipeline.py` ROS 2 node. The bridge SDK simply sends configuration commands and receives detection results — no local models or GPU required on your machine.
 
 ---
 
@@ -837,20 +833,22 @@ from bonicbot_bridge.vision import DetectionMode
 | `DetectionMode.POSE` | `'pose'` | 17 COCO body keypoints |
 | `DetectionMode.GESTURE` | `'gesture'` | Hand gestures (Thumb_Up, Open_Palm, Victory, etc.) |
 | `DetectionMode.ARUCO` | `'aruco'` | ArUco fiducial markers with full pose (tvec, rvec, distance) |
-| `DetectionMode.YOLO` | `'yolo'` | YOLO with selectable model (yolov8n, yolov8s, etc.) |
+| `DetectionMode.YOLO` | `'yolo'` | YOLO object detection (uses robot's onboard yolov8n.onnx) |
 
 > **Note:** `DetectionMode.LINE` is reserved for a future mode and will raise `DetectionModeError` if used.
 
 ---
 
-#### `enable_detection(mode, model='yolo26n', **kwargs)`
+#### `enable_detection(mode, model='yolov8n', dictionary=None)`
 
-Enable a vision detection pipeline mode.
+Enable a vision detection pipeline mode on the remote robot.
+
+This publishes a JSON configuration to `/vision/control` which toggles the requested detector on the robot's `vision_pipeline.py` node. Only one mode is activated per call (all others are set to `False`).
 
 **Parameters:**
 - `mode` (DetectionMode): The detection mode to enable
-- `model` (str): YOLO model name (default: `'yolo26n'`). Only used when `mode` is `DetectionMode.YOLO`
-- `dictionary` (str): ArUco dictionary name. Only used when `mode` is `DetectionMode.ARUCO`
+- `model` (str): YOLO model name (default: `'yolov8n'`). Reserved for future multi-model support
+- `dictionary` (str | None): ArUco dictionary name. Reserved for future use
 
 **Supported ArUco dictionaries:** `DICT_4X4_50`, `DICT_4X4_100`, `DICT_4X4_250`, `DICT_5X5_50`, `DICT_6X6_50`
 
@@ -875,11 +873,11 @@ bot.enable_detection(DetectionMode.POSE)
 # Gesture recognition
 bot.enable_detection(DetectionMode.GESTURE)
 
-# ArUco marker tracking with specific dictionary
-bot.enable_detection(DetectionMode.ARUCO, dictionary='DICT_4X4_50')
+# ArUco marker tracking
+bot.enable_detection(DetectionMode.ARUCO)
 
-# YOLO with model selection
-bot.enable_detection(DetectionMode.YOLO, model='yolov8s')
+# YOLO object detection (uses robot's onboard yolov8n.onnx)
+bot.enable_detection(DetectionMode.YOLO)
 ```
 
 ---
@@ -898,13 +896,30 @@ bot.disable_detection()
 
 #### `get_active_mode()`
 
-Return the currently active vision mode string.
+Return a dict of active detector states (updated live from the robot's `/vision/*_active` Bool topics).
 
-**Returns:** `str` — the active mode (e.g. `'face'`, `'object'`, `'disable'`, or `'unknown'` before the first message arrives)
+**Returns:** `dict` — e.g. `{'yolo': True, 'pose': False, 'face': False, 'gesture': False, 'aruco': False}`
 
 ```python
-mode = bot.get_active_mode()
-print(f"Current mode: {mode}")
+status = bot.get_active_mode()
+print(f"Active detectors: {status}")
+# {'yolo': True, 'pose': False, 'face': False, 'gesture': False, 'aruco': False}
+```
+
+---
+
+#### `is_detector_active(detector_name)`
+
+Check if a specific detector is currently active on the robot.
+
+**Parameters:**
+- `detector_name` (str): `'yolo'`, `'pose'`, `'face'`, `'gesture'`, or `'aruco'`
+
+**Returns:** `bool`
+
+```python
+if bot.is_detector_active('yolo'):
+    print("YOLO is running on the robot")
 ```
 
 ---
@@ -1167,7 +1182,7 @@ if marker:
 
 ```python
 from bonicbot_bridge import BonicBot
-from bonicbot_bridge.vision.vision import DetectionMode
+from bonicbot_bridge.vision import DetectionMode
 import time
 
 with BonicBot() as bot:
@@ -1193,7 +1208,7 @@ with BonicBot() as bot:
 
 ```python
 from bonicbot_bridge import BonicBot
-from bonicbot_bridge.vision.vision import DetectionMode
+from bonicbot_bridge.vision import DetectionMode
 import time
 
 with BonicBot() as bot:
@@ -1422,13 +1437,17 @@ The library communicates with these ROS2 topics and services:
 - `/camera/image_raw/compressed` (sensor_msgs/CompressedImage) - Camera images
 - `/camera/camera_info` (sensor_msgs/CameraInfo) - Camera metadata
 - `/robot/camera_active` (std_msgs/Bool) - Camera status
-- `/vision/control` (std_msgs/String) - Vision mode commands (published by SDK)
-- `/vision/detections` (std_msgs/String) - JSON array of YOLO/object detections
-- `/vision/faces` (std_msgs/String) - JSON array of face detections
-- `/vision/pose` (std_msgs/String) - JSON dict of pose keypoints
-- `/vision/gesture` (std_msgs/String) - JSON dict of gesture result
-- `/vision/aruco` (std_msgs/String) - JSON array of ArUco marker detections
-- `/robot/vision_mode` (std_msgs/String) - Currently active vision mode (subscribed by SDK)
+- `/vision/control` (std_msgs/String) - Vision config JSON (published by SDK → robot)
+- `/vision/yolo_detections` (std_msgs/String) - JSON array of YOLO object detections
+- `/vision/face_detections` (std_msgs/String) - JSON array of face detections
+- `/vision/pose_landmarks` (std_msgs/String) - JSON dict of 33 MediaPipe body pose landmarks
+- `/vision/gestures` (std_msgs/String) - JSON dict of hand gesture result
+- `/vision/aruco_ids` (std_msgs/String) - JSON array of ArUco marker IDs and poses
+- `/vision/yolo_active` (std_msgs/Bool) - YOLO detector running status
+- `/vision/pose_active` (std_msgs/Bool) - Pose detector running status
+- `/vision/face_active` (std_msgs/Bool) - Face detector running status
+- `/vision/gesture_active` (std_msgs/Bool) - Gesture detector running status
+- `/vision/aruco_active` (std_msgs/Bool) - ArUco detector running status
 
 **Services:**
 
@@ -1482,10 +1501,10 @@ ModuleNotFoundError: No module named 'bonicbot_bridge'
 
 **Vision Detection Returns Empty Results**
 
-- Ensure vision dependencies are installed: `pip install bonicbot-bridge[vision]`
-- Confirm camera is streaming: `bot.system.start_camera()` must be called first
-- Check the active mode: `print(bot.get_active_mode())` — should match the mode you enabled
-- For ArUco: confirm the physical marker dictionary matches the `dictionary=` kwarg
+- Confirm the robot's `vision_pipeline.py` node is running
+- Confirm camera is streaming: `bot.camera.start_camera_service()` must be called first
+- Check the active detectors: `print(bot.get_active_mode())` — the detector you enabled should show `True`
+- Ensure the required model files exist on the robot (e.g. `~/models/yolov8n.onnx` for YOLO, `~/models/gesture_recognizer.task` for gestures)
 
 ### Debug Mode
 
