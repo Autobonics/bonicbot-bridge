@@ -8,7 +8,7 @@ from .core import BonicBot
 from .exceptions import BonicBotError, ConnectionError, NavigationError, PreciseMotionError
 from .precisemotion import PreciseMotionEngine
 from .servo import ServoController
-from .vision import DetectionMode, DetectionModeError, VisionController, VisionError
+from .vision import VisionController
 
 __version__ = "0.2.0"
 __author__ = "Autobonics Pvt Ltd"
@@ -18,12 +18,9 @@ __all__ = [
     "CameraManager",
     "ServoController",
     "VisionController",
-    "DetectionMode",
     "BonicBotError",
     "ConnectionError",
     "NavigationError",
     "PreciseMotionError",
-    "VisionError",
-    "DetectionModeError",
     "PreciseMotionEngine",
 ]
