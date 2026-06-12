@@ -13,7 +13,7 @@ from .motion import MotionController
 from .sensors import SensorManager
 from .servo import ServoController
 from .system import SystemController
-from .vision.vision import VisionController
+from .vision import VisionController
 from .autonomous import ExploreController
 
 DEFAULT_HOST = "localhost"
@@ -556,5 +556,17 @@ class BonicBot:
     def wait_for_marker(self, marker_id, timeout=5.0):
         """Wait for specific ArUco marker. Delegates to: vision.wait_for_marker()"""
         return self.vision.wait_for_marker(marker_id, timeout=timeout)
+
+    def wait_for_gesture(self, gesture_name, timeout=5.0):
+        """Wait for a specific gesture. Delegates to: vision.wait_for_gesture()"""
+        return self.vision.wait_for_gesture(gesture_name, timeout=timeout)
+
+    def wait_for_face(self, timeout=5.0):
+        """Wait for any face to be detected. Delegates to: vision.wait_for_face()"""
+        return self.vision.wait_for_face(timeout=timeout)
+
+    def wait_for_pose(self, timeout=5.0):
+        """Wait for pose keypoints to be detected. Delegates to: vision.wait_for_pose()"""
+        return self.vision.wait_for_pose(timeout=timeout)
 
     # ═══════════════════════════════════════════════════════════════════════

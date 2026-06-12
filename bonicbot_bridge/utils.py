@@ -157,12 +157,33 @@ JOINT_STATES_TOPIC             = "/joint_states"
 
 # ── Vision pipeline topics ───────────────────────────────────────────────
 VISION_CONTROL_TOPIC           = "/vision/control"
-VISION_MODE_TOPIC              = "/robot/vision_mode"
-VISION_DETECTIONS_TOPIC        = "/vision/detections"
-VISION_FACES_TOPIC             = "/vision/faces"
-VISION_POSE_TOPIC              = "/vision/pose"
-VISION_GESTURE_TOPIC           = "/vision/gesture"
-VISION_ARUCO_TOPIC             = "/vision/aruco"
+VISION_YOLO_DETECTIONS_TOPIC   = "/vision/yolo_detections"
+VISION_FACE_DETECTIONS_TOPIC   = "/vision/face_detections"
+VISION_POSE_LANDMARKS_TOPIC    = "/vision/pose_landmarks"
+VISION_GESTURES_TOPIC          = "/vision/gestures"
+VISION_ARUCO_IDS_TOPIC         = "/vision/aruco_ids"
+VISION_NEAREST_PERSON_TOPIC    = "/vision/nearest_person"
+
+# ── Vision pipeline services ─────────────────────────────────────────────
+ROBOT_START_VISION_SERVICE     = "/robot/start_vision"
+ROBOT_STOP_VISION_SERVICE      = "/robot/stop_vision"
+ROBOT_ENABLE_YOLO_SERVICE      = "/robot/enable_yolo"
+ROBOT_DISABLE_YOLO_SERVICE     = "/robot/disable_yolo"
+ROBOT_ENABLE_FACE_SERVICE      = "/robot/enable_face"
+ROBOT_DISABLE_FACE_SERVICE     = "/robot/disable_face"
+ROBOT_ENABLE_POSE_SERVICE      = "/robot/enable_pose"
+ROBOT_DISABLE_POSE_SERVICE     = "/robot/disable_pose"
+ROBOT_ENABLE_GESTURE_SERVICE   = "/robot/enable_gesture"
+ROBOT_DISABLE_GESTURE_SERVICE  = "/robot/disable_gesture"
+ROBOT_ENABLE_ARUCO_SERVICE     = "/robot/enable_aruco"
+ROBOT_DISABLE_ARUCO_SERVICE    = "/robot/disable_aruco"
+
+# ── Vision active status topics (Bool) ───────────────────────────────────
+VISION_YOLO_ACTIVE_TOPIC       = "/vision/yolo_active"
+VISION_POSE_ACTIVE_TOPIC       = "/vision/pose_active"
+VISION_FACE_ACTIVE_TOPIC       = "/vision/face_active"
+VISION_GESTURE_ACTIVE_TOPIC    = "/vision/gesture_active"
+VISION_ARUCO_ACTIVE_TOPIC      = "/vision/aruco_active"
 
 # ── Additional message types ─────────────────────────────────────────────
 MARKER_ARRAY_MESSAGE_TYPE      = "visualization_msgs/MarkerArray"

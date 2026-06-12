@@ -53,6 +53,12 @@ setup(
             "opencv-python>=4.5",
             "numpy>=1.20",
         ],
+        "vision": [
+            "ultralytics",
+            "mediapipe",
+            "opencv-python>=4.5",
+            "numpy>=1.20",
+        ],
     },
     entry_points={
         "console_scripts": [
