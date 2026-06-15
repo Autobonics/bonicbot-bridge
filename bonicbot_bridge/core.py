@@ -63,7 +63,7 @@ class BonicBot:
     def connect(self, timeout=DEFAULT_CONNECTION_TIMEOUT_SECONDS) -> bool:
         """Establish connection to robot"""
         if timeout <= 0:
-            raise ValueError("Connection timeout must be greater than 0")
+            raise ConnectionError("Connection timeout must be greater than 0")
 
         if self.connected:
             return True

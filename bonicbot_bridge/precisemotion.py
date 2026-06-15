@@ -388,13 +388,13 @@ class QueueMixin:
                 Must be a ``PreciseMotionEngine`` enum member.
 
         Raises:
-            TypeError: If *engine* is not a ``PreciseMotionEngine`` member.
+            PreciseMotionError: If *engine* is not a ``PreciseMotionEngine`` member.
 
         Returns:
             None
         """
         if not isinstance(engine, PreciseMotionEngine):
-            raise TypeError(
+            raise PreciseMotionError(
                 f"engine must be a PreciseMotionEngine member, "
                 f"got {type(engine).__name__}"
             )
@@ -427,8 +427,7 @@ class QueueMixin:
             PreciseMotionEngine: Resolved engine member.
 
         Raises:
-            ValueError: If *engine* is an unrecognised string.
-            TypeError: If *engine* is not str, PreciseMotionEngine, or None.
+            PreciseMotionError: If *engine* is an unrecognised string, or if it is not str, PreciseMotionEngine, or None.
         """
         if engine is None:
             return self._default_engine
@@ -438,11 +437,11 @@ class QueueMixin:
             try:
                 return PreciseMotionEngine(engine)
             except ValueError:
-                raise ValueError(
+                raise PreciseMotionError(
                     f"Unknown engine '{engine}'. "
                     f"Valid engines: {[e.value for e in PreciseMotionEngine]}"
                 )
-        raise TypeError(
+        raise PreciseMotionError(
             f"engine must be PreciseMotionEngine, str, or None — "
             f"got {type(engine).__name__}"
         )

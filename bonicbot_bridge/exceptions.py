@@ -33,5 +33,41 @@ class SystemControlError(BonicBotError):
     pass
 
 
+class VisionError(BonicBotError):
+    """Raised when a vision pipeline operation fails"""
+
+    pass
+
+
+class ServoError(BonicBotError):
+    """Raised when a servo/joint command fails"""
+
+    pass
+
+
+class CameraError(BonicBotError):
+    """Raised when a camera operation fails"""
+
+    pass
+
+
+class SensorError(BonicBotError):
+    """Raised when a sensor read or subscription fails"""
+
+    pass
+
+
+class ExploreError(BonicBotError):
+    """Raised when autonomous exploration fails"""
+
+    pass
+
+
+class ExploreTimeoutError(ExploreError):
+    """Raised when exploration setup or wait exceeds timeout"""
+
+    pass
+
+
 # Backward-compatible alias (avoid shadowing Python's built-in SystemError)
 SystemError = SystemControlError

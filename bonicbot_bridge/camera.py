@@ -10,7 +10,7 @@ from io import BytesIO
 
 from roslibpy import Topic
 
-from .exceptions import BonicBotError
+from .exceptions import BonicBotError, CameraError
 from .utils import (
     CAMERA_INFO_MESSAGE_TYPE,
     COMPRESSED_IMAGE_MESSAGE_TYPE,
@@ -182,7 +182,7 @@ class CameraManager:
             bool: True if streaming started successfully
         """
         if not HAS_CV2 and not HAS_PIL:
-            raise BonicBotError(
+            raise CameraError(
                 "No image library available. Please install opencv-python or Pillow:\n"
                 "  pip install opencv-python\n"
                 "  or\n"
@@ -213,7 +213,7 @@ class CameraManager:
             return True
 
         except Exception as exc:
-            raise BonicBotError(f"Failed to start camera streaming: {str(exc)}")
+            raise CameraError(f"Failed to start camera streaming: {str(exc)}")
 
     def stop_streaming(self):
         """

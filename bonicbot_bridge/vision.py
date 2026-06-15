@@ -81,7 +81,7 @@ from .utils import (
     safe_unadvertise,
     call_trigger_service,
 )
-from .exceptions import BonicBotError
+from .exceptions import BonicBotError, VisionError
 
 # ── Tunable defaults ──────────────────────────────────────────────────────────
 DEFAULT_SERVICE_TIMEOUT_SECONDS = 10.0
@@ -423,7 +423,7 @@ class VisionController:
        
         detector = detector.lower()
         if detector not in self._DETECTOR_SERVICES:
-            raise BonicBotError(
+            raise VisionError(
                 f"Unknown detector '{detector}'. Valid: {list(self._DETECTOR_SERVICES)}"
             )
         enable_svc, _ = self._DETECTOR_SERVICES[detector]
@@ -437,7 +437,7 @@ class VisionController:
        
         detector = detector.lower()
         if detector not in self._DETECTOR_SERVICES:
-            raise BonicBotError(
+            raise VisionError(
                 f"Unknown detector '{detector}'. Valid: {list(self._DETECTOR_SERVICES)}"
             )
         _, disable_svc = self._DETECTOR_SERVICES[detector]

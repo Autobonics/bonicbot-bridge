@@ -18,7 +18,7 @@ import threading
 
 
 from roslibpy import Topic, Service, ServiceRequest
-from .exceptions import BonicBotError
+from .exceptions import BonicBotError, ExploreError, ExploreTimeoutError
 from .utils import (
     BOOL_MESSAGE_TYPE,
     TRIGGER_SERVICE_TYPE,
@@ -44,16 +44,6 @@ from .utils import (
     safe_unsubscribe,
     safe_unadvertise,
 )
-
-
-class ExploreError(BonicBotError):
-
-    pass
-
-
-class ExploreTimeoutError(ExploreError):
-    pass
-
 
 MAP_THROTTLE_MS = 2000  # 0.5 Hz — OccupancyGrid is large; never flood the bridge
 FRONTIER_THROTTLE_MS = 1000  # 1 Hz
@@ -199,24 +189,9 @@ class ExploreController:
                 print(f"⚠️ Lifecycle callback error: {exc}")
 
     def set_lifecycle_callback(self, callback):
-        """Register a callback for explore_lite lifecycle events.
-
-        Args:
-            callback: callable(status: str) — called with the raw status string
-                      from ExploreStatus.msg on every lifecycle change.
-        """
         self._lifecycle_callback = callback
 
     def start_explore(self) -> bool:
-        """
-        Publish {'data': True} to /explore/resume to resume explore_lite.
-
-        Returns:
-            bool: True on success.
-
-        Raises:
-            ExploreError: on publish failure.
-        """
         try:
             self._resume_pub.publish({"data": True})
             with self._state_lock:
