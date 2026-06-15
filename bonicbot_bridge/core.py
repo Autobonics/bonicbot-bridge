@@ -292,6 +292,22 @@ class BonicBot:
         """Get the full cached OccupancyGrid map data. Delegates to: system.get_map_data()"""
         return self.system.get_map_data()
 
+    def goto_location(self, name: str) -> None:
+        """Send command to navigate to a saved location. Delegates to: system.goto_location()"""
+        return self.system.goto_location(name)
+
+    def save_location(self, name: str) -> None:
+        """Save the current robot pose as a named location. Delegates to: system.save_location()"""
+        return self.system.save_location(name)
+
+    def delete_location(self, name: str) -> None:
+        """Delete a saved named location. Delegates to: system.delete_location()"""
+        return self.system.delete_location(name)
+
+    def delete_all_locations(self) -> bool:
+        """Delete every saved location on the robot. Delegates to: system.delete_all_locations()"""
+        return self.system.delete_all_locations()
+
     def setup_for_navigation(self) -> bool:
         """Configure system for navigation. Delegates to: system.setup_for_navigation()"""
         return self.system.setup_for_navigation()
@@ -315,10 +331,6 @@ class BonicBot:
     def wait_for_map_complete(self, timeout=300.0) -> bool:
         """Wait for exploration to complete. Delegates to: explore.wait_for_map_complete()"""
         return self.explore.wait_for_map_complete(timeout)
-
-    def get_explored_area(self) -> float:
-        """Get the current explored area in square meters. Delegates to: explore.get_explored_area()"""
-        return self.explore.get_explored_area()
 
     def is_connected(self) -> bool:
         """Check if connected to robot."""
