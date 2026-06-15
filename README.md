@@ -820,22 +820,15 @@ with BonicBot() as bot:
 
 #### Detection Modes
 
-The `DetectionMode` enum defines all available pipeline modes. Import it from:
+The vision pipeline uses string literals to define all available pipeline modes.
 
-```python
-from bonicbot_bridge.vision import DetectionMode
-```
-
-| Mode | String | What it detects |
-|------|--------|----------------|
-| `DetectionMode.OBJECT` | `'object'` | 80 COCO classes (person, bottle, chair, etc.) |
-| `DetectionMode.FACE` | `'face'` | Human faces with 5 facial landmarks |
-| `DetectionMode.POSE` | `'pose'` | 17 COCO body keypoints |
-| `DetectionMode.GESTURE` | `'gesture'` | Hand gestures (Thumb_Up, Open_Palm, Victory, etc.) |
-| `DetectionMode.ARUCO` | `'aruco'` | ArUco fiducial markers with full pose (tvec, rvec, distance) |
-| `DetectionMode.YOLO` | `'yolo'` | YOLO object detection (uses robot's onboard yolov8n.onnx) |
-
-> **Note:** `DetectionMode.LINE` is reserved for a future mode and will raise `DetectionModeError` if used.
+| String | What it detects |
+|--------|----------------|
+| `'yolo'` | YOLO object detection (80 COCO classes: person, bottle, chair, etc.) |
+| `'face'` | Human faces with 5 facial landmarks |
+| `'pose'` | 17 COCO body keypoints |
+| `'gesture'` | Hand gestures (Thumb_Up, Open_Palm, Victory, etc.) |
+| `'aruco'` | ArUco fiducial markers with full pose (tvec, rvec, distance) |
 
 ---
 
@@ -846,38 +839,33 @@ Enable a vision detection pipeline mode on the remote robot.
 This publishes a JSON configuration to `/vision/control` which toggles the requested detector on the robot's `vision_pipeline.py` node. Only one mode is activated per call (all others are set to `False`).
 
 **Parameters:**
-- `mode` (DetectionMode): The detection mode to enable
+- `mode` (str): The detection mode to enable (`'yolo'`, `'face'`, `'pose'`, `'gesture'`, or `'aruco'`)
 - `model` (str): YOLO model name (default: `'yolov8n'`). Reserved for future multi-model support
 - `dictionary` (str | None): ArUco dictionary name. Reserved for future use
 
 **Supported ArUco dictionaries:** `DICT_4X4_50`, `DICT_4X4_100`, `DICT_4X4_250`, `DICT_5X5_50`, `DICT_6X6_50`
 
-**Returns:** `True` on successful publish
+**Returns:** `dict` response from the service
 
 **Raises:**
-- `DetectionModeError` if `mode` is not a valid `DetectionMode` enum member, is `DetectionMode.NONE`, or is `DetectionMode.LINE`
+- `BonicBotError` if `mode` is not a valid detection mode
 - `VisionError` if the publish call fails
 
 ```python
-from bonicbot_bridge.vision import DetectionMode
-
-# Object detection (80 COCO classes)
-bot.enable_detection(DetectionMode.OBJECT)
+# YOLO object detection (uses robot's onboard yolov8n.onnx)
+bot.enable_detection('yolo')
 
 # Face detection
-bot.enable_detection(DetectionMode.FACE)
+bot.enable_detection('face')
 
 # Pose estimation
-bot.enable_detection(DetectionMode.POSE)
+bot.enable_detection('pose')
 
 # Gesture recognition
-bot.enable_detection(DetectionMode.GESTURE)
+bot.enable_detection('gesture')
 
 # ArUco marker tracking
-bot.enable_detection(DetectionMode.ARUCO)
-
-# YOLO object detection (uses robot's onboard yolov8n.onnx)
-bot.enable_detection(DetectionMode.YOLO)
+bot.enable_detection('aruco')
 ```
 
 ---
@@ -896,29 +884,44 @@ bot.disable_detection()
 
 #### `get_active_mode()`
 
-Return a dict of active detector states (updated live from the robot's `/vision/*_active` Bool topics).
+Return the currently active detector mode.
 
-**Returns:** `dict` — e.g. `{'yolo': True, 'pose': False, 'face': False, 'gesture': False, 'aruco': False}`
+**Returns:** `str | None` — e.g. `'yolo'`, `'face'`, or `None` if no detector is active.
 
 ```python
 status = bot.get_active_mode()
-print(f"Active detectors: {status}")
-# {'yolo': True, 'pose': False, 'face': False, 'gesture': False, 'aruco': False}
+print(f"Active mode: {status}")
 ```
 
 ---
 
-#### `is_detector_active(detector_name)`
+#### `get_active_detectors()`
 
-Check if a specific detector is currently active on the robot.
+Return a list of all currently active detector names.
 
-**Parameters:**
-- `detector_name` (str): `'yolo'`, `'pose'`, `'face'`, `'gesture'`, or `'aruco'`
-
-**Returns:** `bool`
+**Returns:** `list[str]` — e.g. `['yolo', 'face']`
 
 ```python
-if bot.is_detector_active('yolo'):
+active_detectors = bot.vision.get_active_detectors()
+print(f"Active detectors: {active_detectors}")
+```
+
+---
+
+#### Status Properties
+
+Check if specific detectors are currently active on the robot using properties on `bot.vision`:
+
+- `bot.vision.vision_active` (bool): True if the vision pipeline is running.
+- `bot.vision.yolo_enabled` (bool)
+- `bot.vision.pose_enabled` (bool)
+- `bot.vision.face_enabled` (bool)
+- `bot.vision.gesture_enabled` (bool)
+- `bot.vision.aruco_enabled` (bool)
+- `bot.vision.is_any_detection_active` (bool)
+
+```python
+if bot.vision.yolo_enabled:
     print("YOLO is running on the robot")
 ```
 
@@ -952,6 +955,18 @@ for det in all_dets:
 # Filter by class
 people = bot.get_detections(class_filter='person')
 print(f"Found {len(people)} people")
+```
+
+#### `get_nearest_person()`
+
+Return the nearest person detection based on distance estimation.
+
+**Returns:** `dict | None`
+
+```python
+person = bot.vision.get_nearest_person()
+if person:
+    print(f"Nearest person is at ({person['center_x']}, {person['center_y']})")
 ```
 
 ---
@@ -1182,13 +1197,12 @@ if marker:
 
 ```python
 from bonicbot_bridge import BonicBot
-from bonicbot_bridge.vision import DetectionMode
 import time
 
 with BonicBot() as bot:
     # Activate camera and enable object detection
     bot.system.start_camera()
-    bot.enable_detection(DetectionMode.OBJECT)
+    bot.enable_detection('yolo')
     time.sleep(1)  # Allow pipeline to initialize
 
     # Print detections for 10 seconds
@@ -1208,12 +1222,11 @@ with BonicBot() as bot:
 
 ```python
 from bonicbot_bridge import BonicBot
-from bonicbot_bridge.vision import DetectionMode
 import time
 
 with BonicBot() as bot:
     bot.system.start_camera()
-    bot.enable_detection(DetectionMode.FACE)
+    bot.enable_detection('face')
     time.sleep(1)
 
     print("Waiting for a face...")
@@ -1236,12 +1249,11 @@ with BonicBot() as bot:
 
 ```python
 from bonicbot_bridge import BonicBot
-from bonicbot_bridge.vision.vision import DetectionMode
 import time
 
 with BonicBot() as bot:
     bot.system.start_camera()
-    bot.enable_detection(DetectionMode.GESTURE)
+    bot.enable_detection('gesture')
     time.sleep(1)
 
     print("Gesture control active! Show your hand...")
@@ -1271,11 +1283,10 @@ with BonicBot() as bot:
 
 ```python
 from bonicbot_bridge import BonicBot
-from bonicbot_bridge.vision.vision import DetectionMode
 
 with BonicBot() as bot:
     bot.system.start_camera()
-    bot.enable_detection(DetectionMode.ARUCO, dictionary='DICT_4X4_50')
+    bot.enable_detection('aruco', dictionary='DICT_4X4_50')
 
     print("Looking for marker #1...")
     marker = bot.wait_for_marker(marker_id=1, timeout=15.0)
@@ -1304,14 +1315,13 @@ with BonicBot() as bot:
 
 ```python
 from bonicbot_bridge import BonicBot
-from bonicbot_bridge.vision.vision import DetectionMode
 import time
 
 IMAGE_CENTER_X = 320  # Assuming 640px wide image
 
 with BonicBot() as bot:
     bot.system.start_camera()
-    bot.enable_detection(DetectionMode.POSE)
+    bot.enable_detection('pose')
     time.sleep(1)
 
     print("Stand in front of the camera — robot will follow your nose!")
@@ -1443,6 +1453,7 @@ The library communicates with these ROS2 topics and services:
 - `/vision/pose_landmarks` (std_msgs/String) - JSON dict of 33 MediaPipe body pose landmarks
 - `/vision/gestures` (std_msgs/String) - JSON dict of hand gesture result
 - `/vision/aruco_ids` (std_msgs/String) - JSON array of ArUco marker IDs and poses
+- `/vision/nearest_person` (std_msgs/String) - JSON object of nearest person detection
 - `/vision/yolo_active` (std_msgs/Bool) - YOLO detector running status
 - `/vision/pose_active` (std_msgs/Bool) - Pose detector running status
 - `/vision/face_active` (std_msgs/Bool) - Face detector running status
