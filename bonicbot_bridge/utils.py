@@ -36,7 +36,7 @@ NAVIGATION_SERVICE_CALL_TIMEOUT_SECONDS = 65.0
 
 # Maximum distance (metres) allowed for a single drive_distance() call.
 # Prevents accidental long-distance drives that risk collisions.
-MAX_PRECISE_DISTANCE = 2.0
+MAX_PRECISE_DISTANCE = 10.0
 
 def call_trigger_service(service, timeout_secs, exception_cls, error_prefix):
     """
