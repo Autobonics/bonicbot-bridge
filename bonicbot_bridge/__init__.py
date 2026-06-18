@@ -5,7 +5,19 @@ Provides high-level API for controlling BonicBot via ROS2 rosbridge
 
 from .camera import CameraManager
 from .core import BonicBot
-from .exceptions import BonicBotError, ConnectionError, NavigationError, PreciseMotionError
+from .exceptions import (
+    BonicBotError,
+    ConnectionError,
+    NavigationError,
+    PreciseMotionError,
+    SystemControlError,
+    VisionError,
+    ServoError,
+    CameraError,
+    SensorError,
+    ExploreError,
+    ExploreTimeoutError,
+)
 from .precisemotion import PreciseMotionEngine
 from .servo import ServoController
 from .vision import VisionController
@@ -22,5 +34,12 @@ __all__ = [
     "ConnectionError",
     "NavigationError",
     "PreciseMotionError",
+    "SystemControlError",
+    "VisionError",
+    "ServoError",
+    "CameraError",
+    "SensorError",
+    "ExploreError",
+    "ExploreTimeoutError",
     "PreciseMotionEngine",
 ]

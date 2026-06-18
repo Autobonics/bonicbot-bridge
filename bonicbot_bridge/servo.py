@@ -9,7 +9,7 @@ import time
 
 from roslibpy import Topic
 
-from .exceptions import BonicBotError
+from .exceptions import BonicBotError, ServoError
 from .utils import (
     FLOAT64_MULTI_ARRAY_MESSAGE_TYPE,
     JOINT_STATE_MESSAGE_TYPE,
@@ -178,7 +178,7 @@ class ServoController:
             float: Clamped angle within valid range
         """
         if joint_name not in SERVO_LIMITS:
-            raise BonicBotError(f"Unknown servo joint: {joint_name}")
+            raise ServoError(f"Unknown servo joint: {joint_name}")
 
         min_angle, max_angle = SERVO_LIMITS[joint_name]
         
@@ -234,7 +234,7 @@ class ServoController:
             return True
 
         except Exception as exc:
-            raise BonicBotError(f"Failed to move left arm: {str(exc)}")
+            raise ServoError(f"Failed to move left arm: {str(exc)}")
 
     def move_right_arm(self, shoulder, elbow, wait=True):
         """
@@ -268,7 +268,7 @@ class ServoController:
             return True
 
         except Exception as exc:
-            raise BonicBotError(f"Failed to move right arm: {str(exc)}")
+            raise ServoError(f"Failed to move right arm: {str(exc)}")
 
     def set_grippers(self, left, right):
         """
@@ -306,7 +306,7 @@ class ServoController:
             return True
 
         except Exception as exc:
-            raise BonicBotError(f"Failed to set grippers: {str(exc)}")
+            raise ServoError(f"Failed to set grippers: {str(exc)}")
 
     def open_grippers(self):
         """
@@ -355,7 +355,7 @@ class ServoController:
             return True
 
         except Exception as exc:
-            raise BonicBotError(f"Failed to set left gripper: {str(exc)}")
+            raise ServoError(f"Failed to set left gripper: {str(exc)}")
 
     def set_right_gripper(self, angle):
         """
@@ -386,7 +386,7 @@ class ServoController:
             return True
 
         except Exception as exc:
-            raise BonicBotError(f"Failed to set right gripper: {str(exc)}")
+            raise ServoError(f"Failed to set right gripper: {str(exc)}")
 
     def set_neck(self, yaw):
         """
@@ -417,7 +417,7 @@ class ServoController:
             return True
 
         except Exception as exc:
-            raise BonicBotError(f"Failed to set neck: {str(exc)}")
+            raise ServoError(f"Failed to set neck: {str(exc)}")
 
     def look_left(self):
         """
@@ -564,7 +564,7 @@ class ServoController:
         simplified_name = JOINT_NAME_MAP.get(joint_name, joint_name)
 
         if simplified_name not in self.current_angles:
-            raise BonicBotError(f"Unknown servo joint: {joint_name}")
+            raise ServoError(f"Unknown servo joint: {joint_name}")
 
         return self._get_current_angle(simplified_name)
 

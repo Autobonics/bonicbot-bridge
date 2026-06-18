@@ -2,6 +2,7 @@
 System controller for high-level robot operations
 """
 
+import json
 import time
 
 from roslibpy import Service, ServiceRequest, Topic
@@ -47,6 +48,9 @@ from .utils import (
 DEFAULT_ROBOT_STATE = "idle"
 NAVIGATION_READY_TIMEOUT_SECONDS = 5.0
 NAVIGATION_READY_POLL_INTERVAL_SECONDS = 0.1
+DELETE_ALL_LOCATIONS_POLL_INTERVAL_SECONDS = 0.1
+DELETE_ALL_LOCATIONS_TIMEOUT_SECONDS = 10.0
+DELETE_ALL_LOCATIONS_SETTLE_SECONDS = 0.3
 # INACTIVE_RESPONSE_TEXT, ALREADY_ACTIVE_RESPONSE_TEXT,
 # NAVIGATION_SERVICE_CALL_TIMEOUT_SECONDS are imported from utils
 SERVICE_CALL_TIMEOUT_SECONDS = 10.0  # Allow enough time for SLAM/Nav nodes to gracefully shutdown
@@ -481,6 +485,52 @@ class SystemController:
     def delete_location(self, name: str):
         """Delete a saved named location."""
         self.delete_loc_pub.publish({'data': name})
+
+    def delete_all_locations(self) -> bool:
+        _latest_locations: list[str] = []
+
+        def _locations_callback(msg: dict) -> None:
+            nonlocal _latest_locations
+            raw = msg.get("data", "[]")
+            try:
+                parsed = json.loads(raw)
+                _latest_locations = parsed if isinstance(parsed, list) else []
+            except (json.JSONDecodeError, TypeError):
+                _latest_locations = []
+
+        # Temporary subscriber — only needed for the duration of this call
+        locations_sub = self.subscribe_to_locations_list(_locations_callback)
+
+        # Brief settle so the first callback fires before we start deleting
+        time.sleep(DELETE_ALL_LOCATIONS_SETTLE_SECONDS)
+
+        start_time = time.time()
+        try:
+            while True:
+                if not _latest_locations:
+                    print("🗑️ All locations deleted successfully")
+                    return True
+
+                if (time.time() - start_time) > DELETE_ALL_LOCATIONS_TIMEOUT_SECONDS:
+                    print(
+                        f"⚠️ delete_all_locations timed out — "
+                        f"{len(_latest_locations)} location(s) still remain: "
+                        f"{_latest_locations}"
+                    )
+                    return False
+
+                # Delete every name currently visible in the list, then
+                # re-read the topic to catch any that were missed
+                for name in list(_latest_locations):
+                    self.delete_location(name)
+                    print(f"🗑️ Deleting location: '{name}'")
+
+                # Wait for the robot to process deletes and publish an updated list
+                time.sleep(DELETE_ALL_LOCATIONS_POLL_INTERVAL_SECONDS)
+        finally:
+            # Always clean up the temporary subscriber
+            if locations_sub is not None:
+                safe_unsubscribe(locations_sub)
 
     # --- Dashboard Streaming Subscription Wrappers ---
 

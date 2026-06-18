@@ -19,13 +19,13 @@ Fixes vs original
    frame_count==1, which was always True on the first frame.
 """
 
+import argparse
 import time
 import cv2
 import numpy as np
 from bonicbot_bridge import BonicBot
 
 # ── Configuration ────────────────────────────────────────────────────────────
-ROBOT_HOST  = "192.168.0.145"
 WINDOW_NAME = "BonicBot Vision — Object Detection"
 
 # How long to wait for the vision pipeline to start on the RPi (model loading)
@@ -93,30 +93,16 @@ def wait_for_vision_ready(bot: "BonicBot", timeout: float = VISION_READY_TIMEOUT
         time.sleep(0.1)
     return False
 
-# ── Local Environment Setup ──────────────────────────────────────────────────
-
-def setup_local_testing_env():
-    """
-    When testing the robot stack locally on a PC, the vision_pipeline expects 
-    models in ~/models. This creates a symlink from the local repository.
-    """
-    import os
-    home_models = os.path.expanduser('~/models')
-    local_models = os.path.expanduser('~/autobonic/bonicbot_a2_47/models')
-    
-    if not os.path.exists(home_models) and os.path.exists(local_models):
-        try:
-            os.symlink(local_models, home_models)
-            print(f"🔗 Created local testing symlink: {home_models} -> {local_models}")
-        except Exception as e:
-            print(f"⚠️ Failed to create local testing symlink: {e}")
-
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    setup_local_testing_env()
-    print(f"🔌 Connecting to robot at {ROBOT_HOST}...")
-    bot = BonicBot(host=ROBOT_HOST)
+    parser = argparse.ArgumentParser(description='Test BonicBot vision pipeline')
+    parser.add_argument('--host', type=str, required=True, help='Robot IP address')
+    parser.add_argument('--port', type=int, default=9090, help='ROS bridge port (default: 9090)')
+    args = parser.parse_args()
+
+    print(f"🔌 Connecting to robot at {args.host}:{args.port}...")
+    bot = BonicBot(host=args.host, port=args.port)
 
     try:
         # ── Step 1: Camera hardware + streaming ───────────────────────────────

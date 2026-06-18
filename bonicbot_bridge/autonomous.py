@@ -18,7 +18,7 @@ import threading
 
 
 from roslibpy import Topic, Service, ServiceRequest
-from .exceptions import BonicBotError
+from .exceptions import BonicBotError, ExploreError, ExploreTimeoutError
 from .utils import (
     BOOL_MESSAGE_TYPE,
     TRIGGER_SERVICE_TYPE,
@@ -45,19 +45,6 @@ from .utils import (
     safe_unadvertise,
 )
 
-
-class ExploreError(BonicBotError):
-    """General exploration failure (publish error, ROS stack not ready)"""
-
-    pass
-
-
-class ExploreTimeoutError(ExploreError):
-    """wait_for_map_complete() exhausts timeout without reaching min_area"""
-
-    pass
-
-
 MAP_THROTTLE_MS = 2000  # 0.5 Hz — OccupancyGrid is large; never flood the bridge
 FRONTIER_THROTTLE_MS = 1000  # 1 Hz
 VERIFY_TIMEOUT_S = 10.0  # max wait for ROS stack verification in setup (/map check)
@@ -69,20 +56,13 @@ DEFAULT_MAP_TIMEOUT_S = 300.0  # 5 minutes
 
 # Root-cause fix constants
 COSTMAP_SETTLE_S = 5.0  # wait after Nav2 verify before start_explore
-MIN_EXPLORE_TIME_S = 120.0  # minimum seconds before frontier exhaustion accepted
 COSTMAP_KNOWN_CELL_MIN = 50  # min known cells to consider costmap valid
 NAV2_RESTART_WAIT_S = 3.0  # wait after stop_navigation before restart
 
 
 class ExploreController:
     def __init__(self, ros_client, system_controller=None):
-        """
-        Args:
-            ros_client: connected roslibpy Ros instance (from bot.ros)
-            system_controller: optional SystemController reference for state sync.
-                               Never used for service calls — only to keep
-                               navigation_active in sync during exploration.
-        """
+      
         self.ros = ros_client
         self._system = system_controller  # stored for state sync only
 
@@ -90,13 +70,10 @@ class ExploreController:
         self._state_lock = threading.Lock()  # guards shared state below
         self._explore_active = False
         self._latest_area_m2 = 0.0
-        self._frontiers_received_once = False  # guard against false exhaustion
         self._frontiers_exhausted = False
         self._shutdown_called = False
-        self._explore_start_time = 0.0  # RC4: timestamp when exploration started
 
-        self._area_before_goal = 0.0  # area snapshot when goal sent
-        self._area_stagnant_count = 0  # consecutive goals with no growth
+
 
         # explore_lite lifecycle state (from /explore/status)
         self._explore_lifecycle = ""  # raw string from ExploreStatus.msg
@@ -107,7 +84,7 @@ class ExploreController:
 
         # Publisher: /explore/resume — the ACTUAL topic explore_lite subscribes to
         # for pause/resume control (NOT /robot/explore_active which is read-only)
-        self._resume_pub = Topic(self.ros, EXPLORE_RESUME_TOPIC, BOOL_MESSAGE_TYPE)
+        self._resume_pub = Topic(self.ros, EXPLORE_RESUME_TOPIC, BOOL_MESSAGE_TYPE, latch=True)
         self._resume_pub.advertise()
 
         # Live background subscribers (throttled)
@@ -125,7 +102,7 @@ class ExploreController:
             MARKER_ARRAY_MESSAGE_TYPE,
             throttle_rate=FRONTIER_THROTTLE_MS,
         )
-        self._frontier_sub.subscribe(self._on_frontiers)
+        # self._frontier_sub.subscribe(self._on_frontiers)
 
         # Subscribe to /explore/status — authoritative lifecycle events from explore_lite
         self._status_sub = Topic(
@@ -138,8 +115,7 @@ class ExploreController:
     # ── Internal: Direct ROS Service Calls ───────────────────────────────────
 
     def _call_trigger(self, service_name, timeout):
-        """Call a std_srvs/Trigger service directly via roslibpy.
-        Returns the response dict. Raises ExploreError on failure."""
+       
         srv = Service(self.ros, service_name, TRIGGER_SERVICE_TYPE)
         try:
             response = srv.call(ServiceRequest(), timeout=timeout)
@@ -164,11 +140,7 @@ class ExploreController:
             resolution = info.get("resolution", 0.05)  # metres per cell (e.g. 0.05)
             data = msg.get(
                 "data", []
-            )  # flat int8 array, -1=unknown, 0=free, 100=occupied
-
-            # Count known cells (!= -1)
-            # Use list.count() which is implemented in C and 100x faster than a generator.
-            # The generator sum() blocks the roslibpy background thread for seconds on large maps.
+            )  
             if isinstance(data, list):
                 known_cells = len(data) - data.count(-1)
             else:
@@ -183,77 +155,27 @@ class ExploreController:
             )
 
     def _on_frontiers(self, msg):
-        """Callback — frontier visualization marker tracker (secondary signal).
-
-        The primary exhaustion signal comes from /explore/status (ExploreStatus).
-        This callback tracks whether frontiers have ever been received, and
-        enforces a minimum exploration time before accepting exhaustion.
-        """
+        """Callback — frontier visualization marker tracker (diagnostic only)."""
         markers = msg.get("markers", [])
         with self._state_lock:
             if not self._explore_active:
                 return
-            # RC4: Track that we've seen at least one non-empty frontier set
-            if len(markers) > 0:
-                self._frontiers_received_once = True
-            elif self._frontiers_received_once:
-                # RC4: Enforce minimum exploration time before accepting exhaustion
-                elapsed = time.time() - self._explore_start_time
-                if elapsed >= MIN_EXPLORE_TIME_S:
-                    self._frontiers_exhausted = True
-                    print("🗺️ explore: all frontiers exhausted — map complete")
-                else:
-                    remaining = MIN_EXPLORE_TIME_S - elapsed
-                    print(
-                        f"⏳ explore: frontiers empty but minimum time not met "
-                        f"({elapsed:.0f}s / {MIN_EXPLORE_TIME_S:.0f}s) — "
-                        f"continuing for {remaining:.0f}s more"
-                    )
+            if len(markers) == 0:
+                self._frontiers_exhausted = True
 
     def _on_explore_status(self, msg):
-        """Callback — authoritative lifecycle events from explore_lite node.
-
-        explore_lite publishes ExploreStatus messages on /explore/status with
-        status values: exploration_started, exploration_in_progress,
-        exploration_paused, exploration_complete, returning_to_origin,
-        returned_to_origin.
-
-        RC4: exploration_complete is also gated by MIN_EXPLORE_TIME_S to prevent
-        premature exhaustion from stale costmap data during the initial boot window.
-        """
         status = msg.get("status", "")
         with self._state_lock:
             self._explore_lifecycle = status
 
             if status == EXPLORE_STATUS_COMPLETE:
-                # RC4: Gate by minimum exploration time
-                elapsed = time.time() - self._explore_start_time
-                if elapsed >= MIN_EXPLORE_TIME_S:
-                    self._frontiers_exhausted = True
-                    print(
-                        "🗺️ explore_lite: all frontiers exhausted — exploration complete"
-                    )
-                else:
-                    remaining = MIN_EXPLORE_TIME_S - elapsed
-                    print(
-                        f"⏳ explore_lite: reports complete but minimum time not met "
-                        f"({elapsed:.0f}s / {MIN_EXPLORE_TIME_S:.0f}s) — "
-                        f"ignoring for {remaining:.0f}s more"
-                    )
+                self._frontiers_exhausted = True
+                print("🗺️ explore_lite: frontiers exhausted")
             elif status == EXPLORE_STATUS_RETURNING:
                 print("🗺️ explore_lite: returning to initial pose...")
             elif status == EXPLORE_STATUS_RETURNED:
                 self._returned_to_init = True
-                # RC4: Return-to-init also gated
-                elapsed = time.time() - self._explore_start_time
-                if elapsed >= MIN_EXPLORE_TIME_S:
-                    self._frontiers_exhausted = True
-                    print("🗺️ explore_lite: returned to initial pose — map complete")
-                else:
-                    print(
-                        f"⏳ explore_lite: returned to init but minimum time not met "
-                        f"({elapsed:.0f}s / {MIN_EXPLORE_TIME_S:.0f}s)"
-                    )
+                print("🗺️ explore_lite: returned to initial pose")
             elif status == EXPLORE_STATUS_PAUSED:
                 print("🗺️ explore_lite: exploration paused")
             elif status in (EXPLORE_STATUS_STARTED, EXPLORE_STATUS_IN_PROGRESS):
@@ -267,30 +189,13 @@ class ExploreController:
                 print(f"⚠️ Lifecycle callback error: {exc}")
 
     def set_lifecycle_callback(self, callback):
-        """Register a callback for explore_lite lifecycle events.
-
-        Args:
-            callback: callable(status: str) — called with the raw status string
-                      from ExploreStatus.msg on every lifecycle change.
-        """
         self._lifecycle_callback = callback
 
     def start_explore(self) -> bool:
-        """
-        Publish {'data': True} to /explore/resume to resume explore_lite.
-
-        Returns:
-            bool: True on success.
-
-        Raises:
-            ExploreError: on publish failure.
-        """
         try:
             self._resume_pub.publish({"data": True})
             with self._state_lock:
                 self._explore_active = True
-                self._explore_start_time = time.time()  # RC4: record start time
-                self._frontiers_received_once = False
                 self._frontiers_exhausted = False
                 self._returned_to_init = False
                 self._explore_lifecycle = ""
@@ -300,16 +205,7 @@ class ExploreController:
             raise ExploreError(f"Failed to start exploration: {exc}")
 
     def stop_explore(self) -> bool:
-        """
-        Stop exploration: publish resume=False AND call /robot/stop_explore service
-        to actually kill the explore_lite process on robot_manager.
-
-        Returns:
-            bool: True on success.
-
-        Raises:
-            ExploreError: on publish failure.
-        """
+    
         try:
             # 1. Pause explore_lite via its resume topic
             self._resume_pub.publish({"data": False})
@@ -333,13 +229,7 @@ class ExploreController:
         return True
 
     def suspend_for_manual_control(self) -> bool:
-        """
-        Pause exploration and stop Nav2 to allow manual joystick control.
-        Call resume_from_manual_control() to restart.
-
-        Returns:
-            bool: True if both operations succeeded.
-        """
+ 
         try:
             self.stop_explore()
             if self._system:
@@ -350,10 +240,7 @@ class ExploreController:
             raise ExploreError(f"Failed to suspend for manual control: {exc}")
 
     def resume_from_manual_control(self) -> bool:
-        """
-        Restart Nav2 and resume exploration after manual driving.
-        Does NOT call setup_for_exploration() — assumes SLAM already running.
-        """
+
         try:
             if self._system:
                 self._system.start_navigation()
@@ -364,38 +251,11 @@ class ExploreController:
             raise ExploreError(f"Failed to resume from manual control: {exc}")
 
     def is_exploring(self) -> bool:
-        """
-        Return self._explore_active; never blocks.
-        """
+
         return self._explore_active
 
-    def get_explored_area(self) -> float:
-        """
-        Return self._latest_area_m2; updated by background /map subscriber.
-        """
-        return self._latest_area_m2
-
     def setup_for_exploration(self, progress_callback=None) -> bool:
-        """
-        Boot SLAM + Nav2 + explore_lite via direct ROS service calls,
-        then verify the data topics are alive before returning.
-
-        This method bypasses system.py wrappers entirely because:
-        - system.start_navigation() silently returns False when mapping is active
-        - Exploration REQUIRES both mapping AND navigation to run concurrently
-        - The robot_manager ROS node fully supports this (it checks mapping_active
-          and launches nav2 in SLAM mode when true)
-
-        Args:
-            progress_callback: optional callable(step: int, total: int, stage: str, message: str)
-                               Called at each setup stage for live progress reporting.
-
-        Returns:
-            bool: True if all subsystems verified.
-
-        Raises:
-            ExploreError: if any subsystem fails to start or verify.
-        """
+       
         TOTAL_STEPS = 7
 
         def _report(step, stage, message):
@@ -491,105 +351,36 @@ class ExploreController:
         _report(7, "complete", "✅ Exploration stack fully ready — robot is exploring!")
         return True
 
-    def _check_area_growth(
-        self, area_before: float, area_after: float, goal_index: int
-    ) -> None:
-        """Log warning if a completed navigation goal produced no map growth."""
-        growth = area_after - area_before
-        AREA_GROWTH_MIN_M2 = 0.1  # expect at least 0.1m² new area per goal
-        if growth < AREA_GROWTH_MIN_M2:
-            self._area_stagnant_count += 1
-            print(
-                f"⚠️ Goal {goal_index} completed but map grew only "
-                f"{growth:.2f}m² (< {AREA_GROWTH_MIN_M2}m²). "
-                f"Stagnant count: {self._area_stagnant_count}. "
-                f"Possible causes: LIDAR range too short, Nav2 blocked "
-                f"joystick during drive, or min_frontier_size too large."
-            )
-        else:
-            self._area_stagnant_count = 0
-            print(
-                f"✅ Goal {goal_index}: map grew {growth:.2f}m² "
-                f"(total: {area_after:.1f}m²)"
-            )
-
     def wait_for_map_complete(
         self,
-        min_area: float,
         timeout: float = DEFAULT_MAP_TIMEOUT_S,
         progress_callback=None,
-        strict_area: bool = False,
     ) -> bool:
-        """
-        Poll _latest_area_m2 and _frontiers_exhausted.
-
-        Completion is detected via three signals:
-          1. Area threshold reached: _latest_area_m2 >= min_area
-          2. explore_lite reports EXPLORATION_COMPLETE or RETURNED_TO_ORIGIN
-          3. Time limit reached (timeout). By default, reaching the timeout
-             is treated as a successful completion of the exploration time window.
-
-        Args:
-            min_area: target area in m² to consider the map "complete".
-            timeout: maximum wait time in seconds (exploration duration).
-            progress_callback: optional callable for live progress.
-            strict_area: if True, raises ExploreTimeoutError on timeout instead of returning True.
-
-        Returns:
-            bool: True on any completion condition (including time window reached).
-
-        Raises:
-            ExploreTimeoutError: on timeout ONLY IF strict_area=True.
-        """
         start = time.time()
 
         try:
             while True:
                 elapsed = time.time() - start
 
-                # Snapshot shared state under lock
+                # Snapshot current area under lock
                 with self._state_lock:
                     current_area = self._latest_area_m2
                     exhausted = self._frontiers_exhausted
 
                 # Report progress
                 if progress_callback:
-                    progress_callback(current_area, min_area, elapsed, exhausted)
+                    progress_callback(current_area, elapsed)
 
-                # Exit condition 1: area threshold met
-                if current_area >= min_area:
-                    print(
-                        f"✅ Map complete: {current_area:.1f}m² reached target {min_area:.1f}m²"
-                    )
-                    return True
-
-                # Exit condition 2: explore_lite reports exploration complete
-                # Secondary fix: log whether area target was actually met
+                # Exit early if explore_lite reports all frontiers exhausted
                 if exhausted:
-                    if current_area >= min_area:
-                        print(
-                            f"✅ Map complete: frontiers exhausted + area target met "
-                            f"({current_area:.1f}m² / {min_area:.1f}m²)"
-                        )
-                    else:
-                        print(
-                            f"⚠️ Frontiers exhausted but area {current_area:.1f}m² "
-                            f"< target {min_area:.1f}m² — map may be incomplete"
-                        )
                     return True
 
-                # Timeout check (Time-based exploration exit)
+                # Time-based exploration exit
                 if elapsed >= timeout:
-                    if strict_area:
-                        raise ExploreTimeoutError(
-                            f"map incomplete after {elapsed:.0f}s — "
-                            f"area {current_area:.1f}m² / {min_area:.1f}m² target"
-                        )
-                    else:
-                        print(f"✅ Exploration time window ({timeout:.0f}s) completed.")
-                        return True
+                    print(f"✅ Exploration time window ({timeout:.0f}s) completed.")
+                    return True
 
-                # Print clean progress without the verbose diagnostics
+                # Print clean progress
                 print(f"⏳ Exploring... ({elapsed:.0f}s / {timeout:.0f}s elapsed)")
                 time.sleep(2.0)  # Polling interval matches map throttle
         finally:
@@ -601,7 +392,6 @@ class ExploreController:
             return {
                 "explore_active": self._explore_active,
                 "latest_area_m2": round(self._latest_area_m2, 2),
-                "frontiers_received_once": self._frontiers_received_once,
                 "frontiers_exhausted": self._frontiers_exhausted,
                 "explore_lifecycle": self._explore_lifecycle,
                 "returned_to_init": self._returned_to_init,

@@ -1,3 +1,4 @@
+from typing import Any
 """
 Core BonicBot class for robot control
 """
@@ -59,10 +60,10 @@ class BonicBot:
         # Connect to robot
         self.connect(timeout)
 
-    def connect(self, timeout=DEFAULT_CONNECTION_TIMEOUT_SECONDS):
+    def connect(self, timeout=DEFAULT_CONNECTION_TIMEOUT_SECONDS) -> bool:
         """Establish connection to robot"""
         if timeout <= 0:
-            raise ValueError("Connection timeout must be greater than 0")
+            raise ConnectionError("Connection timeout must be greater than 0")
 
         if self.connected:
             return True
@@ -100,7 +101,7 @@ class BonicBot:
         except Exception as exc:
             raise ConnectionError(f"Connection failed: {str(exc)}")
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         """Disconnect from robot"""
         if self.ros and self.ros.is_connected:
             for controller in (
@@ -131,7 +132,7 @@ class BonicBot:
             self.connected = False
             print("🔌 Disconnected from BonicBot")
 
-    def _get_camera(self):
+    def _get_camera(self) -> Any:
         if self._camera is None:
             self._camera = CameraManager(self.ros)
         return self._camera
@@ -149,308 +150,303 @@ class BonicBot:
         self.disconnect()
 
     # Quick access methods (delegate to controllers)
-    def move(self, linear_x=0, linear_y=0, angular_z=0):
+    def move(self, linear_x=0, linear_y=0, angular_z=0) -> bool:
         """Publish raw velocity commands. Delegates to: motion.move()"""
         return self.motion.move(linear_x, linear_y, angular_z)
 
-    def move_forward(self, speed=DEFAULT_LINEAR_SPEED, duration=None):
+    def move_forward(self, speed=DEFAULT_LINEAR_SPEED, duration=None) -> bool:
         """Move robot forward. Delegates to: motion.move_forward()"""
         return self.motion.move_forward(speed, duration)
 
-    def move_backward(self, speed=DEFAULT_LINEAR_SPEED, duration=None):
+    def move_backward(self, speed=DEFAULT_LINEAR_SPEED, duration=None) -> bool:
         """Move robot backward. Delegates to: motion.move_backward()"""
         return self.motion.move_backward(speed, duration)
 
-    def turn_left(self, speed=DEFAULT_TURN_SPEED, duration=None):
+    def turn_left(self, speed=DEFAULT_TURN_SPEED, duration=None) -> bool:
         """Turn robot left. Delegates to: motion.turn_left()"""
         return self.motion.turn_left(speed, duration)
 
-    def turn_right(self, speed=DEFAULT_TURN_SPEED, duration=None):
+    def turn_right(self, speed=DEFAULT_TURN_SPEED, duration=None) -> bool:
         """Turn robot right. Delegates to: motion.turn_right()"""
         return self.motion.turn_right(speed, duration)
 
-    def stop(self):
+    def stop(self) -> bool:
         """Stop robot movement. Delegates to: motion.stop()"""
         return self.motion.stop()
 
-    def go_to(self, x, y, theta=0):
+    def go_to(self, x, y, theta=0) -> bool:
         """Navigate to specific coordinate. Delegates to: motion.go_to()"""
         return self.motion.go_to(x, y, theta)
 
-    def get_battery(self):
+    def get_battery(self) -> float:
         """Get battery percentage. Delegates to: sensors.get_battery()"""
         if not self.is_connected():
             return None
         return self.sensors.get_battery()
 
-    def get_position(self):
+    def get_position(self) -> dict:
         """Get current robot position. Delegates to: sensors.get_position()"""
         return self.sensors.get_position()
 
-    def get_x(self):
+    def get_x(self) -> float:
         """Get current X position in meters. Delegates to: sensors.get_x()"""
         return self.sensors.get_x()
 
-    def get_y(self):
+    def get_y(self) -> float:
         """Get current Y position in meters. Delegates to: sensors.get_y()"""
         return self.sensors.get_y()
 
-    def get_heading(self):
+    def get_heading(self) -> float:
         """Get current robot heading in degrees. Delegates to: sensors.get_heading()"""
         return self.sensors.get_heading()
 
-    def get_distance_traveled(self, start_pos=None):
+    def get_distance_traveled(self, start_pos=None) -> float:
         """Get distance traveled since start or from a given position. Delegates to: sensors.get_distance_traveled()"""
         return self.sensors.get_distance_traveled(start_pos)
 
-    def wait_for_data(self, timeout=5.0):
+    def wait_for_data(self, timeout=5.0) -> bool:
         """Wait for initial sensor data. Delegates to: sensors.wait_for_data()"""
         return self.sensors.wait_for_data(timeout)
 
-    def subscribe_to_position(self, callback):
+    def subscribe_to_position(self, callback) -> None:
         """Subscribe to continuous position updates. Delegates to: sensors.subscribe_to_position()"""
         return self.sensors.subscribe_to_position(callback)
 
-    def get_sensor_info(self):
+    def get_sensor_info(self) -> dict:
         """Get all sensor state. Delegates to: sensors.get_sensor_info()"""
         return self.sensors.get_sensor_info()
 
-    def start_mapping(self):
+    def start_mapping(self) -> bool:
         """Start mapping mode. Delegates to: system.start_mapping()"""
         return self.system.start_mapping()
 
-    def stop_mapping(self):
+    def stop_mapping(self) -> bool:
         """Stop mapping mode. Delegates to: system.stop_mapping()"""
         return self.system.stop_mapping()
 
-    def save_map(self):
+    def save_map(self) -> bool:
         """Save current map. Delegates to: system.save_map()"""
         return self.system.save_map()
 
-    def start_navigation(self):
+    def start_navigation(self) -> bool:
         """Start navigation system. Delegates to: system.start_navigation()"""
         return self.system.start_navigation()
 
-    def stop_navigation(self):
+    def stop_navigation(self) -> bool:
         """Stop navigation system. Delegates to: system.stop_navigation()"""
         return self.system.stop_navigation()
 
-    def cancel_goal(self):
+    def cancel_goal(self) -> bool:
         """Cancel current navigation goal. Delegates to: motion.cancel_goal()"""
         return self.motion.cancel_goal()
 
-    def get_nav_status(self):
+    def get_nav_status(self) -> str:
         """Get current navigation status. Delegates to: motion.get_nav_status()"""
         return self.motion.get_nav_status()
 
-    def is_moving(self):
+    def is_moving(self) -> bool:
         """Check if robot is currently moving. Delegates to: motion.is_moving()"""
         return self.motion.is_moving()
 
-    def get_system_status(self):
+    def get_system_status(self) -> dict:
         """Get system status information. Delegates to: system.get_system_status()"""
         return self.system.get_system_status()
 
-    def is_mapping(self):
+    def is_mapping(self) -> bool:
         """Check if robot is currently mapping. Delegates to: system.is_mapping()"""
         return self.system.is_mapping()
 
-    def is_navigating(self):
+    def is_navigating(self) -> bool:
         """Check if navigation system is active. Delegates to: system.is_navigating()"""
         return self.system.is_navigating()
 
-    def get_robot_state(self):
+    def get_robot_state(self) -> dict:
         """Get current robot hardware state. Delegates to: system.get_robot_state()"""
         return self.system.get_robot_state()
 
-    def activate_camera_hardware(self):
+    def activate_camera_hardware(self) -> bool:
         """Turn on the physical camera node on the robot. Delegates to: system.start_camera()"""
         return self.system.start_camera()
 
-    def deactivate_camera_hardware(self):
+    def deactivate_camera_hardware(self) -> bool:
         """Turn off the physical camera node on the robot. Delegates to: system.stop_camera()"""
         return self.system.stop_camera()
 
-    def is_camera_active(self):
+    def is_camera_active(self) -> bool:
         """Check if physical camera node is running. Delegates to: system.is_camera_active()"""
         return self.system.is_camera_active()
 
-    def setup_for_mapping(self):
+    def setup_for_mapping(self) -> bool:
         """Configure system for mapping. Delegates to: system.setup_for_mapping()"""
         return self.system.setup_for_mapping()
 
-    def has_saved_map(self):
+    def has_saved_map(self) -> bool:
         """Check if a saved map exists on the robot. Delegates to: system.has_saved_map()"""
         return self.system.has_saved_map()
 
-    def get_map_info(self):
+    def get_map_info(self) -> dict:
         """Get current map metadata (resolution, width, height, origin). Delegates to: system.get_map_info()"""
         return self.system.get_map_info()
 
-    def get_map_data(self):
+    def get_map_data(self) -> list:
         """Get the full cached OccupancyGrid map data. Delegates to: system.get_map_data()"""
         return self.system.get_map_data()
 
-    def setup_for_navigation(self):
+    def goto_location(self, name: str) -> None:
+        """Send command to navigate to a saved location. Delegates to: system.goto_location()"""
+        return self.system.goto_location(name)
+
+    def save_location(self, name: str) -> None:
+        """Save the current robot pose as a named location. Delegates to: system.save_location()"""
+        return self.system.save_location(name)
+
+    def delete_location(self, name: str) -> None:
+        """Delete a saved named location. Delegates to: system.delete_location()"""
+        return self.system.delete_location(name)
+
+    def delete_all_locations(self) -> bool:
+        """Delete every saved location on the robot. Delegates to: system.delete_all_locations()"""
+        return self.system.delete_all_locations()
+
+    def setup_for_navigation(self) -> bool:
         """Configure system for navigation. Delegates to: system.setup_for_navigation()"""
         return self.system.setup_for_navigation()
 
-    def setup_for_exploration(self):
+    def setup_for_exploration(self) -> bool:
         """Configure system for autonomous exploration. Delegates to: explore.setup_for_exploration()"""
         return self.explore.setup_for_exploration()
 
-    def start_explore(self):
+    def start_explore(self) -> bool:
         """Start autonomous exploration. Delegates to: explore.start_explore()"""
         return self.explore.start_explore()
 
-    def stop_explore(self):
+    def stop_explore(self) -> bool:
         """Stop autonomous exploration. Delegates to: explore.stop_explore()"""
         return self.explore.stop_explore()
 
-    def is_exploring(self):
+    def is_exploring(self) -> bool:
         """Check if autonomous exploration is active. Delegates to: explore.is_exploring()"""
         return self.explore.is_exploring()
 
-    def get_explored_area(self):
-        """Get the current explored area in square meters. Delegates to: explore.get_explored_area()"""
-        return self.explore.get_explored_area()
-
-    def wait_for_map_complete(self, min_area, timeout=300.0):
+    def wait_for_map_complete(self, timeout=300.0) -> bool:
         """Wait for exploration to complete. Delegates to: explore.wait_for_map_complete()"""
-        return self.explore.wait_for_map_complete(min_area, timeout)
+        return self.explore.wait_for_map_complete(timeout)
 
-    def is_connected(self):
+    def is_connected(self) -> bool:
         """Check if connected to robot."""
         return self.connected and self.ros and self.ros.is_connected
 
-    def wait_for_goal(self, timeout=DEFAULT_GOAL_TIMEOUT_SECONDS):
+    def wait_for_goal(self, timeout=DEFAULT_GOAL_TIMEOUT_SECONDS) -> bool:
         """Wait for current navigation goal to complete. Delegates to: motion.wait_for_goal()"""
         return self.motion.wait_for_goal(timeout)
 
-    def get_distance_to_goal(self):
+    def get_distance_to_goal(self) -> float:
         """Get distance to current navigation goal. Delegates to: motion.get_distance_to_goal()"""
         return self.motion.get_distance_to_goal()
 
-    def set_initial_pose(self, x, y, theta=0):
+    def set_initial_pose(self, x, y, theta=0) -> bool:
         """Set initial pose for localization. Delegates to: motion.set_initial_pose()"""
         return self.motion.set_initial_pose(x, y, theta)
 
     # Camera methods
-    def start_camera(self, callback=None):
-        """
-        Start camera streaming (client-side subscription).
-        Delegates to: camera.start_streaming()
-
-        Note: Call bot.system.start_camera() first to activate robot's camera hardware,
-        then call this to start receiving images in your script.
-
-        Args:
-            callback: Optional function(image) called for each frame
-        """
+    def start_camera(self, callback=None) -> bool:
         return self._get_camera().start_streaming(callback=callback)
 
-    def stop_camera(self):
-        """
-        Stop camera streaming (client-side subscription).
-        Delegates to: camera.stop_streaming()
-
-        Note: Call bot.system.stop_camera() after this to deactivate robot's camera
-        hardware for better performance.
-        """
+    def stop_camera(self) -> bool:
         if not self._camera:
             return False
         return self._camera.stop_streaming()
 
-    def get_image(self):
+    def get_image(self) -> Any:
         """Get latest camera image. Delegates to: camera.get_latest_image()"""
         if not self._camera:
             return None
         return self._camera.get_latest_image()
 
-    def save_image(self, filepath):
+    def save_image(self, filepath) -> bool:
         """Save current camera image. Delegates to: camera.save_image()"""
         if not self._camera:
             return False
         return self._camera.save_image(filepath)
 
-    def get_camera_info(self):
+    def get_camera_info(self) -> dict:
         """Get camera intrinsics/info. Delegates to: camera.get_camera_info()"""
         return self._camera.get_camera_info() if self._camera else None
 
-    def is_streaming(self):
+    def is_streaming(self) -> bool:
         """Check if camera stream is active locally. Delegates to: camera.is_streaming()"""
         return self._camera.is_streaming() if self._camera else False
 
-    def wait_for_image(self, timeout=5.0):
+    def wait_for_image(self, timeout=5.0) -> bool:
         """Wait for the next image frame. Delegates to: camera.wait_for_image()"""
         return self._camera.wait_for_image(timeout) if self._camera else False
 
     # Servo shortcuts
-    def set_servos(self, angles):
+    def set_servos(self, angles) -> bool:
         """Set servo angles (dictionary of joint_name: angle_degrees). Delegates to: servo.set_servo_angles()"""
         return self.servo.set_servo_angles(angles)
 
-    def move_left_arm(self, shoulder, elbow, wait=True):
+    def move_left_arm(self, shoulder, elbow, wait=True) -> bool:
         """Move left arm (shoulder, elbow angles in degrees). Delegates to: servo.move_left_arm()"""
         return self.servo.move_left_arm(shoulder, elbow, wait=wait)
 
-    def move_right_arm(self, shoulder, elbow, wait=True):
+    def move_right_arm(self, shoulder, elbow, wait=True) -> bool:
         """Move right arm (shoulder, elbow angles in degrees). Delegates to: servo.move_right_arm()"""
         return self.servo.move_right_arm(shoulder, elbow, wait=wait)
 
-    def set_grippers(self, left, right):
+    def set_grippers(self, left, right) -> bool:
         """Set gripper angles in degrees. Delegates to: servo.set_grippers()"""
         return self.servo.set_grippers(left, right)
 
-    def open_grippers(self):
+    def open_grippers(self) -> bool:
         """Open both grippers. Delegates to: servo.open_grippers()"""
         return self.servo.open_grippers()
 
-    def close_grippers(self):
+    def close_grippers(self) -> bool:
         """Close both grippers. Delegates to: servo.close_grippers()"""
         return self.servo.close_grippers()
 
-    def set_neck(self, yaw):
+    def set_neck(self, yaw) -> bool:
         """Set neck yaw angle in degrees. Delegates to: servo.set_neck()"""
         return self.servo.set_neck(yaw)
 
-    def look_left(self):
+    def look_left(self) -> bool:
         """Turn neck fully left. Delegates to: servo.look_left()"""
         return self.servo.look_left()
 
-    def look_right(self):
+    def look_right(self) -> bool:
         """Turn neck fully right. Delegates to: servo.look_right()"""
         return self.servo.look_right()
 
-    def look_center(self):
+    def look_center(self) -> bool:
         """Center the neck. Delegates to: servo.look_center()"""
         return self.servo.look_center()
 
-    def reset_servos(self):
+    def reset_servos(self) -> bool:
         """Reset all servos to neutral position. Delegates to: servo.reset_all_servos()"""
         return self.servo.reset_all_servos()
 
-    def set_left_gripper(self, angle):
+    def set_left_gripper(self, angle) -> bool:
         """Set left gripper angle. Delegates to: servo.set_left_gripper()"""
         return self.servo.set_left_gripper(angle)
 
-    def set_right_gripper(self, angle):
+    def set_right_gripper(self, angle) -> bool:
         """Set right gripper angle. Delegates to: servo.set_right_gripper()"""
         return self.servo.set_right_gripper(angle)
 
-    def get_servo_angles(self):
+    def get_servo_angles(self) -> dict:
         """Get current angles of all servos. Delegates to: servo.get_servo_angles()"""
         return self.servo.get_servo_angles()
 
-    def get_servo_limits(self):
+    def get_servo_limits(self) -> dict:
         """Get angle limits for all servos. Delegates to: servo.get_servo_limits()"""
         return self.servo.get_servo_limits()
 
-    def set_single_servo(self, joint_name, angle):
+    def set_single_servo(self, joint_name, angle) -> bool:
         """Set a specific servo by name. Delegates to: servo.set_single_servo()"""
         return self.servo.set_single_servo(joint_name, angle)
 
-    def get_single_servo(self, joint_name):
+    def get_single_servo(self, joint_name) -> float:
         """Get angle of a specific servo. Delegates to: servo.get_single_servo()"""
         return self.servo.get_single_servo(joint_name)
 
@@ -459,11 +455,11 @@ class BonicBot:
     # NEW — Precise-motion delegates (drive_distance / rotate_angle / drive_and_rotate)
     # ═══════════════════════════════════════════════════════════════════════
 
-    def drive_distance(self, dist, speed=0.3, engine="internal", timeout=30.0):
+    def drive_distance(self, dist, speed=0.3, engine="internal", timeout=30.0) -> bool:
         """Drive a specific distance. Delegates to: motion.drive_distance()"""
         return self.motion.drive_distance(dist, speed, engine=engine, timeout=timeout)
 
-    def rotate_angle(self, angle, speed=45.0, engine="internal", timeout=30.0):
+    def rotate_angle(self, angle, speed=45.0, engine="internal", timeout=30.0) -> bool:
         """Rotate by a specific angle. Delegates to: motion.rotate_angle()"""
         return self.motion.rotate_angle(angle, speed, engine=engine, timeout=timeout)
 
@@ -475,11 +471,11 @@ class BonicBot:
             dist, angle, speed, turn_speed, engine=engine, timeout=timeout
         )
 
-    def set_default_engine(self, engine):
+    def set_default_engine(self, engine) -> None:
         """Set default precise motion engine ('internal' or 'nav2'). Delegates to: motion.set_default_engine()"""
         return self.motion.set_default_engine(engine)
 
-    def is_precise_moving(self):
+    def is_precise_moving(self) -> bool:
         """Check if a precise motion action is running. Delegates to: motion.is_precise_moving()"""
         return self.motion.is_precise_moving()
 
@@ -488,15 +484,15 @@ class BonicBot:
     # NEW — Command queue delegates (enqueue_move / run_queue / clear_queue / draw_square)
     # ═══════════════════════════════════════════════════════════════════════
 
-    def enqueue_move(self, cmd_list):
+    def enqueue_move(self, cmd_list) -> bool:
         """Push motion commands onto the queue. Delegates to: motion.enqueue_move()"""
         return self.motion.enqueue_move(cmd_list)
 
-    def run_queue(self, block=True):
+    def run_queue(self, block=True) -> bool:
         """Execute queued commands. Delegates to: motion.run_queue()"""
         return self.motion.run_queue(block)
 
-    def clear_queue(self):
+    def clear_queue(self) -> bool:
         """Flush queue and stop current motion. Delegates to: motion.clear_queue()"""
         return self.motion.clear_queue()
 
@@ -513,59 +509,59 @@ class BonicBot:
     # NEW — Vision pipeline delegates (enable_detection / disable_detection / get_active_mode)
     # ═══════════════════════════════════════════════════════════════════════
 
-    def enable_detection(self, mode, model='yolov8n', **kwargs):
+    def enable_detection(self, mode, model='yolov8n', **kwargs) -> bool:
         """Enable a vision detection mode. Delegates to: vision.enable_detection()"""
         return self.vision.enable_detection(mode, model=model, **kwargs)
 
-    def disable_detection(self):
+    def disable_detection(self) -> bool:
         """Disable the vision detection pipeline. Delegates to: vision.disable_detection()"""
         return self.vision.disable_detection()
 
-    def get_active_mode(self):
+    def get_active_mode(self) -> str:
         """Get the currently active vision mode. Delegates to: vision.get_active_mode()"""
         return self.vision.get_active_mode()
 
-    def get_detections(self, class_filter=None):
+    def get_detections(self, class_filter=None) -> list:
         """Get latest detection results. Delegates to: vision.get_detections()"""
         return self.vision.get_detections(class_filter=class_filter)
 
-    def get_faces(self):
+    def get_faces(self) -> list:
         """Get latest face detection results. Delegates to: vision.get_faces()"""
         return self.vision.get_faces()
 
-    def get_pose_keypoints(self):
+    def get_pose_keypoints(self) -> list:
         """Get latest pose keypoints. Delegates to: vision.get_pose_keypoints()"""
         return self.vision.get_pose_keypoints()
 
-    def wait_for_detection(self, target_class, timeout=5.0):
+    def wait_for_detection(self, target_class, timeout=5.0) -> bool:
         """Wait for a specific detection class. Delegates to: vision.wait_for_detection()"""
         return self.vision.wait_for_detection(target_class, timeout=timeout)
 
-    def get_gesture(self):
+    def get_gesture(self) -> str:
         """Get current gesture class. Delegates to: vision.get_gesture()"""
         return self.vision.get_gesture()
 
-    def get_gesture_full(self):
+    def get_gesture_full(self) -> dict:
         """Get full gesture result dict. Delegates to: vision.get_gesture_full()"""
         return self.vision.get_gesture_full()
 
-    def get_aruco_markers(self):
+    def get_aruco_markers(self) -> list:
         """Get list of ArUco markers. Delegates to: vision.get_aruco_markers()"""
         return self.vision.get_aruco_markers()
 
-    def wait_for_marker(self, marker_id, timeout=5.0):
+    def wait_for_marker(self, marker_id, timeout=5.0) -> bool:
         """Wait for specific ArUco marker. Delegates to: vision.wait_for_marker()"""
         return self.vision.wait_for_marker(marker_id, timeout=timeout)
 
-    def wait_for_gesture(self, gesture_name, timeout=5.0):
+    def wait_for_gesture(self, gesture_name, timeout=5.0) -> bool:
         """Wait for a specific gesture. Delegates to: vision.wait_for_gesture()"""
         return self.vision.wait_for_gesture(gesture_name, timeout=timeout)
 
-    def wait_for_face(self, timeout=5.0):
+    def wait_for_face(self, timeout=5.0) -> bool:
         """Wait for any face to be detected. Delegates to: vision.wait_for_face()"""
         return self.vision.wait_for_face(timeout=timeout)
 
-    def wait_for_pose(self, timeout=5.0):
+    def wait_for_pose(self, timeout=5.0) -> bool:
         """Wait for pose keypoints to be detected. Delegates to: vision.wait_for_pose()"""
         return self.vision.wait_for_pose(timeout=timeout)
 
