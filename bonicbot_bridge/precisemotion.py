@@ -41,9 +41,7 @@ DEFAULT_QUEUE_TIMEOUT = 30.0         # seconds per command
 DEFAULT_QUEUE_ENGINE = "internal"
 QUEUE_POLL_INTERVAL_SECONDS = 0.05   # 50 ms between empty-queue checks
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# NEW — Precise-motion constants (drive_distance / rotate_angle / drive_and_rotate)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ── Precise-motion constants ───────────────────────────────────────────
 
 # Odometry topic (shared with sensors.py but independent subscription)
 
@@ -73,9 +71,7 @@ class PreciseMotionEngine(enum.Enum):
     INTERNAL = "internal"
     NAV2 = "nav2"
 
-# Deprecated string aliases — kept for backward compatibility
-ENGINE_INTERNAL = PreciseMotionEngine.INTERNAL.value
-ENGINE_NAV2 = PreciseMotionEngine.NAV2.value
+
 
 # Default speeds for drive methods
 DEFAULT_DRIVE_SPEED = 0.3  # m/s
@@ -87,11 +83,16 @@ LASER_SCAN_MESSAGE_TYPE = "sensor_msgs/LaserScan"
 
 OBSTACLE_DISTANCE_THRESHOLD_M = 0.5       # stop if obstacle closer than this
 OBSTACLE_FORWARD_HALF_CONE_DEG = 30       # ±30° forward cone (60° total)
+                                          # NOTE: used as raw index count in
+                                          # _is_path_blocked — assumes 360 LiDAR
+                                          # samples (1 sample/degree). See the
+                                          # comment in _is_path_blocked() if the
+                                          # LiDAR driver ever changes resolution.
 OBSTACLE_MAX_WAIT_SECONDS = 30.0          # give up waiting for obstacle to clear
 OBSTACLE_LOG_INTERVAL_SECONDS = 3.0       # rate-limit "blocked" log messages
 VALID_RANGE_MIN = 0.01                    # ignore 0.0 / noise returns from Gazebo
 
-# ═══════════════════════════════════════════════════════════════════════════════
+
 
 
 class QueueMixin:
@@ -381,15 +382,12 @@ class QueueMixin:
             traceback.print_exc()
             return False
 
-    # ── Teardown ─────────────────────────────────────────────────────
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # NEW — Precise-motion methods (drive_distance / rotate_angle / drive_and_rotate)
+    # ── Precise-motion methods ────────────────────────────────────────
     #
     # Helpers: _odom_callback, _get_position_from_odom, _get_yaw_from_odom,
     #          _normalize_angle, _wait_for_odom, _send_action_goal
-    # Public:  set_default_engine, is_precise_moving, drive_distance, rotate_angle, drive_and_rotate
-    # ═══════════════════════════════════════════════════════════════════════
+    # Public:  set_default_engine, is_precise_moving, drive_distance,
+    #          rotate_angle, drive_and_rotate
 
     def set_default_engine(self, engine):
         """Set the default execution engine for precise motion commands.
@@ -476,6 +474,14 @@ class QueueMixin:
 
         Uses the forward ±30° cone (indices wrapping around 0/359) when driving
         forward, or the rear ±30° cone (centred on index 180) when reversing.
+
+        .. note:: Cone width assumption
+           ``OBSTACLE_FORWARD_HALF_CONE_DEG`` is used directly as an index
+           count, which gives a correct ±30° cone **only** when the scan
+           contains exactly 360 samples (1 sample per degree).  If the
+           LiDAR driver or Gazebo config ever changes ``angle_increment``,
+           compute the index count from ``scan["angle_increment"]`` instead
+           to keep the cone width accurate.
 
         Args:
             direction (float): Positive = check forward cone, negative = check rear cone.
@@ -768,14 +774,26 @@ class QueueMixin:
         return False
 
     def _drive_distance_nav2(self, dist, speed, timeout):
-        """Nav2 engine: DriveOnHeading action client with wait-and-resume."""
+        """Nav2 engine: DriveOnHeading action client with wait-and-resume.
+
+        .. note:: Obstacle detection heuristic
+           Nav2's DriveOnHeading does not expose a distinct "blocked by
+           obstacle" failure code — any non-success result could be an
+           obstacle, a planner abort, or an action-server error.  We
+           heuristically check ``_is_path_blocked()`` immediately after
+           a failure.  There is a small race window: the obstacle could
+           clear between the action failing and our LiDAR check, causing
+           us to reach the ``else: raise NavigationError`` branch with a
+           slightly inaccurate message.  This is a known Nav2 limitation,
+           not a bug.
+        """
         if not self._wait_for_odom():
             print("⚠️ drive_distance (nav2): no odometry data — aborting")
             return False
 
         abs_dist = abs(dist)
         direction = 1.0 if dist >= 0 else -1.0
-        
+
         start_pos = self._get_position_from_odom()
         if start_pos is None:
             return False
@@ -802,7 +820,7 @@ class QueueMixin:
                     "speed": float(abs(speed)),
                     "time_allowance": {"sec": int(max(1, timeout - motion_elapsed)), "nanosec": 0},
                 }
-                
+
                 start_time = time.time()
                 success = self._send_action_goal(
                     DRIVE_ON_HEADING_ACTION, DRIVE_ON_HEADING_ACTION_TYPE,
@@ -811,10 +829,18 @@ class QueueMixin:
                 motion_elapsed += (time.time() - start_time)
 
                 if success:
-                    print(f"✅ drive_distance (nav2): completed {abs_dist:.3f}m (target {abs_dist:.3f}m)")
+                    # Compute actual traveled distance for accurate logging
+                    cur_pos = self._get_position_from_odom()
+                    if cur_pos is not None:
+                        dx = cur_pos[0] - start_pos[0]
+                        dy = cur_pos[1] - start_pos[1]
+                        traveled = math.sqrt(dx * dx + dy * dy)
+                        print(f"✅ drive_distance (nav2): reached {traveled:.3f}m (target {abs_dist:.3f}m)")
+                    else:
+                        print(f"✅ drive_distance (nav2): completed {abs_dist:.3f}m target")
                     return True
 
-                # Action failed. Check if path is blocked.
+                # Action failed — heuristic: check if path is blocked (see docstring note).
                 if self._is_path_blocked(direction):
                     while self._is_path_blocked(direction) and not self._move_cancel.is_set():
                         time.sleep(ODOM_POLL_INTERVAL_SECONDS)
@@ -830,10 +856,13 @@ class QueueMixin:
                                 f"blocked for {obstacle_wait_elapsed:.1f}s"
                             )
 
-                    # Path cleared!
+                    # Loop exited — could be path-cleared OR cancellation.
+                    if self._move_cancel.is_set():
+                        return False
+
                     if obstacle_wait_elapsed > 0:
                         print(f"▶️ drive_distance (nav2): path cleared after {obstacle_wait_elapsed:.1f}s, resuming")
-                    
+
                     obstacle_wait_elapsed = 0.0
                     last_obstacle_log = 0.0
 
@@ -842,7 +871,7 @@ class QueueMixin:
                     if cur_pos is None:
                         time.sleep(ODOM_POLL_INTERVAL_SECONDS)
                         continue
-                    
+
                     dx = cur_pos[0] - start_pos[0]
                     dy = cur_pos[1] - start_pos[1]
                     traveled = math.sqrt(dx * dx + dy * dy)
@@ -876,6 +905,14 @@ class QueueMixin:
     ):
         """
         Rotate the robot by a specific angle using odometry feedback or Nav2.
+
+        .. note:: Obstacle wait/resume parity
+           Only the ``INTERNAL`` engine pauses and resumes on obstacle
+           detection (via ``_is_path_blocked``).  The ``NAV2`` engine
+           (Spin action) hard-fails on obstacle — Nav2 Spin does not
+           expose the feedback needed to implement wait-and-resume.
+           Use ``engine=PreciseMotionEngine.INTERNAL`` if obstacle
+           resilience is required during rotation.
 
         Args:
             angle (float): Rotation angle in degrees.
