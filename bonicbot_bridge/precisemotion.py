@@ -81,6 +81,16 @@ ENGINE_NAV2 = PreciseMotionEngine.NAV2.value
 DEFAULT_DRIVE_SPEED = 0.3  # m/s
 DEFAULT_ROTATE_SPEED = 45.0  # deg/s
 
+# ── Obstacle detection ──────────────────────────────────────────────────
+LASER_SCAN_TOPIC = "/scan"
+LASER_SCAN_MESSAGE_TYPE = "sensor_msgs/LaserScan"
+
+OBSTACLE_DISTANCE_THRESHOLD_M = 0.5       # stop if obstacle closer than this
+OBSTACLE_FORWARD_HALF_CONE_DEG = 30       # ±30° forward cone (60° total)
+OBSTACLE_MAX_WAIT_SECONDS = 30.0          # give up waiting for obstacle to clear
+OBSTACLE_LOG_INTERVAL_SECONDS = 3.0       # rate-limit "blocked" log messages
+VALID_RANGE_MIN = 0.01                    # ignore 0.0 / noise returns from Gazebo
+
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -109,6 +119,11 @@ class QueueMixin:
         self._odom_sub = Topic(self.ros, DIFF_CONT_ODOM_TOPIC, ODOMETRY_MESSAGE_TYPE)
         self._current_odom = None
         self._odom_sub.subscribe(self._odom_callback)
+
+        # LiDAR subscription for obstacle detection during precise motion
+        self._scan_sub = Topic(self.ros, LASER_SCAN_TOPIC, LASER_SCAN_MESSAGE_TYPE)
+        self._current_scan = None
+        self._scan_sub.subscribe(self._scan_callback)
 
         # Precise-motion infrastructure
         self._default_engine = PreciseMotionEngine.INTERNAL
@@ -452,6 +467,57 @@ class QueueMixin:
         """Store latest raw odometry message for closed-loop control."""
         self._current_odom = msg
 
+    def _scan_callback(self, msg):
+        """Store latest LaserScan message for obstacle detection."""
+        self._current_scan = msg
+
+    def _is_path_blocked(self, direction):
+        """Check if the path ahead (direction >= 0) or behind (direction < 0) is blocked.
+
+        Uses the forward ±30° cone (indices wrapping around 0/359) when driving
+        forward, or the rear ±30° cone (centred on index 180) when reversing.
+
+        Args:
+            direction (float): Positive = check forward cone, negative = check rear cone.
+
+        Returns:
+            bool: True if any valid LiDAR ray in the cone is below
+                  OBSTACLE_DISTANCE_THRESHOLD_M.  Returns False if no scan
+                  data is available (don't block motion on missing data).
+        """
+        scan = self._current_scan
+        if scan is None:
+            return False
+
+        ranges = scan.get("ranges", [])
+        num_samples = len(ranges)
+        if num_samples == 0:
+            return False
+
+        half_cone = OBSTACLE_FORWARD_HALF_CONE_DEG
+        # Index 0 = forward (due to π yaw mount), index num_samples//2 = rear
+        center = 0 if direction >= 0 else (num_samples // 2)
+
+        # Build index list with wrapping
+        if center == 0:
+            # Forward — wraps around the 0/(num_samples-1) boundary
+            indices = list(range(num_samples - half_cone, num_samples)) + list(range(0, half_cone + 1))
+        else:
+            # Rear — contiguous block around center
+            indices = list(range(center - half_cone, center + half_cone + 1))
+
+        # Check valid ranges against threshold
+        for i in indices:
+            if 0 <= i < num_samples:
+                r = ranges[i]
+                # Skip invalid returns: None (null in JSON), 0.0, inf, nan
+                if r is not None and not math.isnan(r):
+                    if VALID_RANGE_MIN < r < float('inf'):
+                        if r < OBSTACLE_DISTANCE_THRESHOLD_M:
+                            return True
+
+        return False
+
     def _get_position_from_odom(self):
         """
         Extract (x, y) position from current odometry.
@@ -602,7 +668,14 @@ class QueueMixin:
         return self._drive_distance_internal(dist, speed, timeout)
 
     def _drive_distance_internal(self, dist, speed, timeout):
-        """Internal engine: closed-loop drive using /cmd_vel + odometry."""
+        """Internal engine: closed-loop drive using /cmd_vel + odometry.
+
+        Obstacle-aware: subscribes to /scan LiDAR and pauses velocity when
+        the forward (or rear, if reversing) cone is blocked.  The motion
+        timeout only counts time the robot is actually moving — it freezes
+        while waiting for an obstacle to clear.  A separate obstacle-wait
+        timeout prevents indefinite waits.
+        """
         if not self._wait_for_odom():
             print("⚠️ drive_distance: no odometry data — aborting")
             return False
@@ -616,17 +689,50 @@ class QueueMixin:
             return False
 
         self._move_cancel.clear()
-        start_time = time.time()
         self._precise_moving_flag.set()
+
+        motion_elapsed = 0.0
+        obstacle_wait_elapsed = 0.0
+        last_obstacle_log = 0.0
 
         try:
             while not self._move_cancel.is_set():
-                elapsed = time.time() - start_time
-                if elapsed >= timeout:
+                if motion_elapsed >= timeout:
                     raise NavigationError(
-                        f"_drive_distance_internal: odometry timeout — "
-                        f"elapsed {elapsed:.1f}s >= timeout {timeout:.1f}s"
+                        f"_drive_distance_internal: motion timeout — "
+                        f"elapsed {motion_elapsed:.1f}s >= timeout {timeout:.1f}s"
                     )
+
+                # ── Obstacle check ──
+                if self._is_path_blocked(direction):
+                    self.stop()
+                    time.sleep(ODOM_POLL_INTERVAL_SECONDS)
+                    obstacle_wait_elapsed += ODOM_POLL_INTERVAL_SECONDS
+                    # motion_elapsed does NOT advance while blocked
+
+                    # Rate-limited log
+                    if obstacle_wait_elapsed - last_obstacle_log >= OBSTACLE_LOG_INTERVAL_SECONDS:
+                        print(
+                            f"⏸️ drive_distance: obstacle detected, waiting... "
+                            f"({obstacle_wait_elapsed:.1f}s)"
+                        )
+                        last_obstacle_log = obstacle_wait_elapsed
+
+                    if obstacle_wait_elapsed >= OBSTACLE_MAX_WAIT_SECONDS:
+                        raise NavigationError(
+                            f"drive_distance: obstacle wait timeout — "
+                            f"blocked for {obstacle_wait_elapsed:.1f}s"
+                        )
+                    continue
+
+                # ── Path clear ──
+                if obstacle_wait_elapsed > 0:
+                    print(
+                        f"▶️ drive_distance: path cleared after "
+                        f"{obstacle_wait_elapsed:.1f}s, resuming"
+                    )
+                obstacle_wait_elapsed = 0.0
+                last_obstacle_log = 0.0
 
                 cur_pos = self._get_position_from_odom()
                 if cur_pos is None:
@@ -648,6 +754,7 @@ class QueueMixin:
                 # Publish velocity command
                 self.move(linear_x=cmd_speed)
                 time.sleep(ODOM_POLL_INTERVAL_SECONDS)
+                motion_elapsed += ODOM_POLL_INTERVAL_SECONDS
 
         except NavigationError:
             raise
@@ -661,28 +768,104 @@ class QueueMixin:
         return False
 
     def _drive_distance_nav2(self, dist, speed, timeout):
-        """Nav2 engine: DriveOnHeading action client."""
+        """Nav2 engine: DriveOnHeading action client with wait-and-resume."""
+        if not self._wait_for_odom():
+            print("⚠️ drive_distance (nav2): no odometry data — aborting")
+            return False
+
+        abs_dist = abs(dist)
+        direction = 1.0 if dist >= 0 else -1.0
+        
+        start_pos = self._get_position_from_odom()
+        if start_pos is None:
+            return False
+
+        self._move_cancel.clear()
         self._precise_moving_flag.set()
+
+        motion_elapsed = 0.0
+        obstacle_wait_elapsed = 0.0
+        last_obstacle_log = 0.0
+        remaining_dist = abs_dist
+
         try:
-            goal_msg = {
-                "target": {"x": float(dist), "y": 0.0, "z": 0.0},
-                "speed": float(abs(speed)),
-                "time_allowance": {"sec": int(timeout), "nanosec": 0},
-            }
-            success = self._send_action_goal(
-                DRIVE_ON_HEADING_ACTION, DRIVE_ON_HEADING_ACTION_TYPE,
-                goal_msg, timeout,
-            )
-            if success:
-                print(f"✅ drive_distance (nav2): completed {dist:.3f}m")
-                return True
-            # OBSTACLE_STOP: Nav2 BT has exhausted retries — raise immediately
-            raise NavigationError(
-                f"drive_distance (nav2): Nav2 returned non-success for "
-                f"{dist:.3f}m — obstacle stop or BT failure"
-            )
+            while not self._move_cancel.is_set():
+                if motion_elapsed >= timeout:
+                    raise NavigationError(
+                        f"drive_distance (nav2): motion timeout — "
+                        f"elapsed {motion_elapsed:.1f}s >= timeout {timeout:.1f}s"
+                    )
+
+                # Send goal to Nav2
+                goal_msg = {
+                    "target": {"x": float(remaining_dist * direction), "y": 0.0, "z": 0.0},
+                    "speed": float(abs(speed)),
+                    "time_allowance": {"sec": int(max(1, timeout - motion_elapsed)), "nanosec": 0},
+                }
+                
+                start_time = time.time()
+                success = self._send_action_goal(
+                    DRIVE_ON_HEADING_ACTION, DRIVE_ON_HEADING_ACTION_TYPE,
+                    goal_msg, timeout - motion_elapsed,
+                )
+                motion_elapsed += (time.time() - start_time)
+
+                if success:
+                    print(f"✅ drive_distance (nav2): completed {abs_dist:.3f}m (target {abs_dist:.3f}m)")
+                    return True
+
+                # Action failed. Check if path is blocked.
+                if self._is_path_blocked(direction):
+                    while self._is_path_blocked(direction) and not self._move_cancel.is_set():
+                        time.sleep(ODOM_POLL_INTERVAL_SECONDS)
+                        obstacle_wait_elapsed += ODOM_POLL_INTERVAL_SECONDS
+
+                        if obstacle_wait_elapsed - last_obstacle_log >= OBSTACLE_LOG_INTERVAL_SECONDS:
+                            print(f"⏸️ drive_distance (nav2): obstacle detected, waiting... ({obstacle_wait_elapsed:.1f}s)")
+                            last_obstacle_log = obstacle_wait_elapsed
+
+                        if obstacle_wait_elapsed >= OBSTACLE_MAX_WAIT_SECONDS:
+                            raise NavigationError(
+                                f"drive_distance (nav2): obstacle wait timeout — "
+                                f"blocked for {obstacle_wait_elapsed:.1f}s"
+                            )
+
+                    # Path cleared!
+                    if obstacle_wait_elapsed > 0:
+                        print(f"▶️ drive_distance (nav2): path cleared after {obstacle_wait_elapsed:.1f}s, resuming")
+                    
+                    obstacle_wait_elapsed = 0.0
+                    last_obstacle_log = 0.0
+
+                    # Calculate remaining distance based on odometry
+                    cur_pos = self._get_position_from_odom()
+                    if cur_pos is None:
+                        time.sleep(ODOM_POLL_INTERVAL_SECONDS)
+                        continue
+                    
+                    dx = cur_pos[0] - start_pos[0]
+                    dy = cur_pos[1] - start_pos[1]
+                    traveled = math.sqrt(dx * dx + dy * dy)
+                    remaining_dist = abs_dist - traveled
+
+                    if remaining_dist <= DISTANCE_TOLERANCE_METERS:
+                        print(f"✅ drive_distance (nav2): reached {traveled:.3f}m (target {abs_dist:.3f}m)")
+                        return True
+                else:
+                    raise NavigationError(
+                        f"drive_distance (nav2): action returned non-success, "
+                        f"but path is clear. Aborting."
+                    )
+
+        except NavigationError:
+            raise
+        except Exception as exc:
+            print(f"❌ drive_distance (nav2) internal error: {exc}")
+            traceback.print_exc()
         finally:
             self._precise_moving_flag.clear()
+
+        return False
 
     def rotate_angle(
         self,
@@ -792,10 +975,11 @@ class QueueMixin:
             if success:
                 print(f"✅ rotate_angle (nav2): completed {angle:.1f}°")
                 return True
-            # OBSTACLE_STOP: Nav2 BT has exhausted retries — raise immediately
             raise NavigationError(
-                f"rotate_angle (nav2): Nav2 returned non-success for "
-                f"{angle:.1f}° — obstacle stop or BT failure"
+                f"rotate_angle (nav2): action returned non-success for "
+                f"{angle:.1f}° — likely obstacle stop. Nav2 engine does not "
+                f"support obstacle wait/resume; use "
+                f"engine=PreciseMotionEngine.INTERNAL for that behaviour."
             )
         finally:
             self._precise_moving_flag.clear()
@@ -844,4 +1028,5 @@ class QueueMixin:
             self._queue_thread.join(timeout=2.0)
         
         safe_unsubscribe(getattr(self, '_odom_sub', None))
+        safe_unsubscribe(getattr(self, '_scan_sub', None))
 
