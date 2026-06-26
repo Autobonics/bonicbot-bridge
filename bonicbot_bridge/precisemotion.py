@@ -1,34 +1,38 @@
 """
 Thread-safe command queue mixin for MotionController.
 
-Provides enqueue_move(), run_queue(), clear_queue(), and draw_square()
-as a mixin class that MotionController inherits from.  All queue state
-is initialised lazily by _init_queue() which must be called once from
-the host class's __init__.
+Provides enqueue_move(), run_queue(), clear_queue(), and draw_square().
+Initialised lazily via _init_queue() from the host class's __init__.
 
-Architecture notes
-──────────────────
-• roslibpy callbacks fire on their own background threads; there is
-  no rclpy executor in this codebase.
-• A single daemon thread (_queue_worker) pulls commands from a
-  stdlib queue.Queue and dispatches them to drive_distance() /
-  rotate_angle() which already do their own closed-loop control.
-• clear_queue() is safe to call from any thread (including roslibpy
-  callbacks) — it touches only a threading.Event and queue.Queue
-  which are both inherently thread-safe.
+This module acts as a bridge to robot_manager.py, handling queue execution 
+and Nav2 start/wait logic. It delegates actual motion to either the 
+obstacle-aware Nav2 engine or the fast internal odometry loop.
 """
 
 import enum
-import math
+import json
 import queue
 import threading
 import time
 import traceback
 
-from roslibpy import ActionClient, Goal, Topic
+from roslibpy import Service, ServiceRequest, Topic
 
-from .exceptions import NavigationError, PreciseMotionError
-from .utils import DIFF_CONT_ODOM_TOPIC, MAX_PRECISE_DISTANCE, ODOMETRY_MESSAGE_TYPE, safe_unsubscribe
+from .exceptions import PreciseMotionError
+
+class PreciseMotionPrematureCompletionError(PreciseMotionError):
+    """Raised when a precise motion command completes suspiciously fast, indicating a failure."""
+    pass
+from .utils import (
+    BOOL_MESSAGE_TYPE,
+    MAX_PRECISE_DISTANCE,
+    NAVIGATION_STATUS_TOPIC,
+    START_NAVIGATION_SERVICE,
+    STRING_MESSAGE_TYPE,
+    TRIGGER_SERVICE_TYPE,
+    safe_unsubscribe,
+    safe_unadvertise,
+)
 
 # ── Queue command types ────────────────────────────────────────────────
 CMD_TYPE_DRIVE = "drive"
@@ -38,76 +42,50 @@ CMD_TYPE_ROTATE = "rotate"
 DEFAULT_QUEUE_DRIVE_SPEED = 0.3      # m/s
 DEFAULT_QUEUE_ROTATE_SPEED = 45.0    # deg/s
 DEFAULT_QUEUE_TIMEOUT = 30.0         # seconds per command
-DEFAULT_QUEUE_ENGINE = "internal"
+DEFAULT_QUEUE_ENGINE = "nav2"
 QUEUE_POLL_INTERVAL_SECONDS = 0.05   # 50 ms between empty-queue checks
 
 # ── Precise-motion constants ───────────────────────────────────────────
 
-# Odometry topic (shared with sensors.py but independent subscription)
+# Bridge communication topics (matching robot_manager.py)
+PRECISE_MOVE_TOPIC = "/robot/precise_move"
+PRECISE_MOVE_ACTIVE_TOPIC = "/robot/precise_move_active"
 
-# Internal engine control loop
-ODOM_POLL_INTERVAL_SECONDS = 0.05  # 20 Hz control loop
+# Timing for wait-for-completion polling
+PRECISE_MOVE_POLL_INTERVAL_SECONDS = 0.05  # 50 ms
+PRECISE_MOVE_START_TIMEOUT_SECONDS = 10.0  # max wait for manager to acknowledge
+NAV2_ACTIVATION_TIMEOUT_SECONDS = 30.0    # max wait for Nav2 to come up
+NAV2_ACTIVATION_POLL_SECONDS = 0.1        # poll interval while waiting for Nav2
+
+# Default speeds for drive methods
+DEFAULT_DRIVE_SPEED = 0.3   # m/s
+DEFAULT_ROTATE_SPEED = 45.0  # deg/s
+
+# Default timeouts
 DRIVE_DISTANCE_TIMEOUT_SECONDS = 30.0
 ROTATE_ANGLE_TIMEOUT_SECONDS = 30.0
-DISTANCE_TOLERANCE_METERS = 0.02  # 2 cm
-ANGLE_TOLERANCE_DEGREES = 1.0  # 1°
-ODOM_WAIT_TIMEOUT_SECONDS = 5.0
-
-# Nav2 action servers
-DRIVE_ON_HEADING_ACTION = "/drive_on_heading"
-SPIN_ACTION = "/spin"
-DRIVE_ON_HEADING_ACTION_TYPE = "nav2_msgs/action/DriveOnHeading"
-SPIN_ACTION_TYPE = "nav2_msgs/action/Spin"
-ACTION_SERVER_TIMEOUT_SECONDS = 10.0
 
 # Engine enum — use this for type-safe engine selection across the codebase
 class PreciseMotionEngine(enum.Enum):
-    """Execution engine for precise motion commands (drive_distance / rotate_angle).
+    """Execution engine for precise motion commands.
 
     Members:
-        INTERNAL: Closed-loop control via /cmd_vel + odometry feedback.
-        NAV2: Delegates to Nav2 action servers (DriveOnHeading / Spin).
+        INTERNAL: Closed-loop control via /cmd_vel + odometry (obstacle-blind).
+        NAV2: Nav2 actions (DriveOnHeading/Spin) with costmap collision checking.
     """
     INTERNAL = "internal"
     NAV2 = "nav2"
 
 
-
-# Default speeds for drive methods
-DEFAULT_DRIVE_SPEED = 0.3  # m/s
-DEFAULT_ROTATE_SPEED = 45.0  # deg/s
-
-# ── Obstacle detection ──────────────────────────────────────────────────
-LASER_SCAN_TOPIC = "/scan"
-LASER_SCAN_MESSAGE_TYPE = "sensor_msgs/LaserScan"
-
-OBSTACLE_DISTANCE_THRESHOLD_M = 0.5       # stop if obstacle closer than this
-OBSTACLE_FORWARD_HALF_CONE_DEG = 30       # ±30° forward cone (60° total)
-                                          # NOTE: used as raw index count in
-                                          # _is_path_blocked — assumes 360 LiDAR
-                                          # samples (1 sample/degree). See the
-                                          # comment in _is_path_blocked() if the
-                                          # LiDAR driver ever changes resolution.
-OBSTACLE_MAX_WAIT_SECONDS = 30.0          # give up waiting for obstacle to clear
-OBSTACLE_LOG_INTERVAL_SECONDS = 3.0       # rate-limit "blocked" log messages
-VALID_RANGE_MIN = 0.01                    # ignore 0.0 / noise returns from Gazebo
-
-
-
-
 class QueueMixin:
     """Thread-safe command queue for sequential motion execution.
-
-    Mix this into MotionController to gain enqueue_move(), run_queue(),
-    clear_queue() and draw_square().  The host class MUST call
-    ``self._init_queue()`` at the end of its ``__init__`` and
-    ``self._queue_shutdown()`` inside ``shutdown()``.
+    Mix into MotionController. Host must call _init_queue() and _queue_shutdown().
     """
 
     # ── Initialisation (called from MotionController.__init__) ───────
 
     def _init_queue(self):
-        """Initialise queue and precise motion infrastructure.  Call once from __init__."""
+        """Initialise queue and precise motion bridge infrastructure.  Call once from __init__."""
         self._cmd_queue = queue.Queue()
         self._queue_cancel = threading.Event()
         self._queue_done_event = threading.Event()
@@ -116,46 +94,78 @@ class QueueMixin:
         # Holds the boolean result of the most recent run_queue() execution
         self._queue_result = True
 
-        # NEW — Odometry subscription for closed-loop drive methods
-        self._odom_sub = Topic(self.ros, DIFF_CONT_ODOM_TOPIC, ODOMETRY_MESSAGE_TYPE)
-        self._current_odom = None
-        self._odom_sub.subscribe(self._odom_callback)
+        # Bridge: publisher to send commands to robot_manager.py
+        self._precise_move_pub = Topic(
+            self.ros, PRECISE_MOVE_TOPIC, STRING_MESSAGE_TYPE
+        )
+        self._precise_move_pub.advertise()
 
-        # LiDAR subscription for obstacle detection during precise motion
-        self._scan_sub = Topic(self.ros, LASER_SCAN_TOPIC, LASER_SCAN_MESSAGE_TYPE)
-        self._current_scan = None
-        self._scan_sub.subscribe(self._scan_callback)
+        # Bridge: subscriber to track when robot_manager.py starts/finishes
+        self._precise_active_sub = Topic(
+            self.ros, PRECISE_MOVE_ACTIVE_TOPIC, BOOL_MESSAGE_TYPE
+        )
+        self._precise_active = False
+        self._precise_active_lock = threading.Lock()
+        self._precise_active_sub.subscribe(self._precise_active_callback)
 
-        # Precise-motion infrastructure
-        self._default_engine = PreciseMotionEngine.INTERNAL
+        # Bridge: service client for starting Nav2 on-demand
+        self._start_nav_srv = Service(
+            self.ros, START_NAVIGATION_SERVICE, TRIGGER_SERVICE_TYPE
+        )
+
+        # Bridge: subscriber to track whether Nav2 is actually running
+        self._nav_active_sub = Topic(
+            self.ros, NAVIGATION_STATUS_TOPIC, BOOL_MESSAGE_TYPE
+        )
+        self._nav_active = False
+        self._nav_active_lock = threading.Lock()
+        self._nav_active_sub.subscribe(self._nav_active_callback)
+
+        # Precise-motion infrastructure — default to NAV2 for obstacle avoidance
+        self._default_engine = PreciseMotionEngine.NAV2
         self._precise_moving_flag = threading.Event()  # SET while executing
+        self._nav2_settle_seconds = 30.0  # Time to wait for behavior servers after nav is active
+
+    # ── Bridge callbacks ─────────────────────────────────────────────
+
+    def _precise_active_callback(self, msg: dict) -> None:
+        """Track the precise_move_active status published by robot_manager.py.
+
+        Args:
+            msg: roslibpy message dict with a ``data`` bool field.
+        """
+        with self._precise_active_lock:
+            self._precise_active = msg["data"]
+
+    def _nav_active_callback(self, msg: dict) -> None:
+        """Track the navigation_active status published by robot_manager.py.
+
+        Args:
+            msg: roslibpy message dict with a ``data`` bool field.
+        """
+        with self._nav_active_lock:
+            self._nav_active = msg["data"]
+
+    # ── Configuration API ────────────────────────────────────────────
+
+    def set_nav2_settle_time(self, seconds: float) -> None:
+        """Set the settle delay used after Nav2 becomes active.
+
+        Args:
+            seconds: Float indicating seconds to wait for behavior servers
+                     (e.g., DriveOnHeading) to be fully ready.
+        """
+        self._nav2_settle_seconds = float(seconds)
 
     # ── Public API ───────────────────────────────────────────────────
 
     def enqueue_move(self, cmd_list):
         """Push motion commands onto the queue (non-blocking).
 
-        Each element of *cmd_list* is a dict with the following keys:
-
-        ┌──────────┬──────────────────────────────────────────────────┐
-        │ Key      │ Description                                      │
-        ├──────────┼──────────────────────────────────────────────────┤
-        │ type     │ ``'drive'`` or ``'rotate'`` (required)           │
-        │ value    │ Distance in metres / angle in degrees (required) │
-        │ speed    │ m/s or deg/s  (optional, uses defaults)          │
-        │ engine   │ ``'internal'`` or ``'nav2'`` (optional)          │
-        │ timeout  │ Per-command timeout in seconds (optional)        │
-        └──────────┴──────────────────────────────────────────────────┘
-
         Args:
-            cmd_list (list[dict]): List of command dictionaries.
-
-        Returns:
-            None
-
-        Thread-safety:
-            queue.Queue.put() is inherently thread-safe.  This method
-            can be called from any thread, including roslibpy callbacks.
+            cmd_list (list[dict]): List of commands. Each dict must have 'type' 
+                                   ('drive'/'rotate') and 'value' (amount).
+                                   Optional: 'speed', 'engine', 'timeout'.
         """
         for cmd in cmd_list:
             if cmd.get("type") not in (CMD_TYPE_DRIVE, CMD_TYPE_ROTATE):
@@ -167,26 +177,13 @@ class QueueMixin:
             self._cmd_queue.put(cmd)
 
     def run_queue(self, block=True):
-        """Start executing the queued commands on a background thread.
-
-        If a background execution is already running, new commands that
-        were enqueued will simply be picked up by the existing thread.
-
+        """Start executing queued commands on a background thread.
+        
         Args:
-            block (bool): If ``True`` (default), block the caller until
-                every queued command has finished (or a failure occurs).
-                If ``False``, return immediately after starting the
-                background thread.
+            block (bool): Block caller until completion if True.
 
         Returns:
-            bool: ``True`` if all commands succeeded.  ``False`` if any
-                  command failed, timed out, or was cancelled.  When
-                  *block* is ``False`` the return value is always
-                  ``True`` (the real result is not yet known).
-
-        Thread-safety:
-            _queue_lock serialises thread creation.  Only one worker
-            thread can exist at a time.
+            bool: True if all commands succeeded, False otherwise (always True if block=False).
         """
         self._queue_cancel.clear()
         self._queue_done_event.clear()
@@ -211,18 +208,7 @@ class QueueMixin:
 
     def clear_queue(self):
         """Flush pending commands and abort the currently executing one.
-
-        Safe to call from any thread (including roslibpy callbacks).
-
-        Behaviour:
-            1. Drain all pending items from the queue.
-            2. Signal the background worker to stop via _queue_cancel.
-            3. Signal the currently running motion primitive to stop
-               via _move_cancel (inherited from MotionController).
-            4. Publish a zero-velocity Twist so the robot halts.
-
-        Returns:
-            None
+        Safe to call from any thread.
         """
         # 1. Drain the queue
         while True:
@@ -252,21 +238,10 @@ class QueueMixin:
                     timeout=DEFAULT_QUEUE_TIMEOUT):
         """Drive the robot in a square pattern.
 
-        Enqueues 4× [drive *side_m*, rotate 90°] and executes them
-        sequentially.  Blocks until the full square is complete or a
-        failure occurs.
-
-        Args:
-            side_m (float): Length of each side in metres.
-            speed (float): Linear speed in m/s (default 0.3).
-            turn_speed (float): Rotational speed in deg/s (default 45).
-            engine (str): ``'internal'`` or ``'nav2'`` (default
-                ``'internal'``).
-            timeout (float): Per-command timeout in seconds (default 30).
+        Enqueues 4x [drive side_m, rotate 90°] and executes sequentially.
 
         Returns:
-            bool: ``True`` if the full square was completed, ``False``
-                  if any leg or turn failed.
+            bool: True if full square completed, False if any leg failed.
         """
         cmds = []
         for _ in range(4):
@@ -303,14 +278,7 @@ class QueueMixin:
     # ── Background worker ────────────────────────────────────────────
 
     def _queue_worker(self):
-        """Daemon thread target — pull and execute commands one by one.
-
-        Error handling policy:
-        • If any command returns False → clear_queue(), set result to
-          False, signal _queue_done_event, exit.
-        • On unexpected exception → same as above, plus traceback.
-        • finally block always sends zero Twist.
-        """
+        """Daemon thread target — pull and execute commands one by one."""
         try:
             while not self._queue_cancel.is_set():
                 # Non-blocking get so we can check the cancel flag
@@ -382,12 +350,12 @@ class QueueMixin:
             traceback.print_exc()
             return False
 
-    # ── Precise-motion methods ────────────────────────────────────────
+    # ── Precise-motion methods (Bridge to robot_manager.py) ───────────
     #
-    # Helpers: _odom_callback, _get_position_from_odom, _get_yaw_from_odom,
-    #          _normalize_angle, _wait_for_odom, _send_action_goal
     # Public:  set_default_engine, is_precise_moving, drive_distance,
     #          rotate_angle, drive_and_rotate
+    # Private: _resolve_engine, _wait_for_precise_move,
+    #          _publish_precise_command
 
     def set_default_engine(self, engine):
         """Set the default execution engine for precise motion commands.
@@ -417,10 +385,9 @@ class QueueMixin:
         """Check if a precise motion command is currently executing.
 
         Returns ``True`` while any ``drive_distance`` / ``rotate_angle`` /
-        ``drive_and_rotate`` command is actively running on either engine.
-        The flag is set before the first velocity publish or action-goal
-        send and cleared in a ``finally`` block, so it resets even if an
-        exception is raised mid-motion.
+        ``drive_and_rotate`` command is actively running.  The flag is set
+        before the command is published and cleared in a ``finally`` block,
+        so it resets even if an exception is raised mid-motion.
 
         Returns:
             bool: ``True`` if a precise motion command is in progress.
@@ -440,7 +407,8 @@ class QueueMixin:
             PreciseMotionEngine: Resolved engine member.
 
         Raises:
-            PreciseMotionError: If *engine* is an unrecognised string, or if it is not str, PreciseMotionEngine, or None.
+            PreciseMotionError: If *engine* is an unrecognised string, or if
+                it is not str, PreciseMotionEngine, or None.
         """
         if engine is None:
             return self._default_engine
@@ -459,174 +427,130 @@ class QueueMixin:
             f"got {type(engine).__name__}"
         )
 
-    # ── Odometry helpers ────────────────────────────────────────────────
-
-    def _odom_callback(self, msg):
-        """Store latest raw odometry message for closed-loop control."""
-        self._current_odom = msg
-
-    def _scan_callback(self, msg):
-        """Store latest LaserScan message for obstacle detection."""
-        self._current_scan = msg
-
-    def _is_path_blocked(self, direction):
-        """Check if the path ahead (direction >= 0) or behind (direction < 0) is blocked.
-
-        Uses the forward ±30° cone (indices wrapping around 0/359) when driving
-        forward, or the rear ±30° cone (centred on index 180) when reversing.
-
-        .. note:: Cone width assumption
-           ``OBSTACLE_FORWARD_HALF_CONE_DEG`` is used directly as an index
-           count, which gives a correct ±30° cone **only** when the scan
-           contains exactly 360 samples (1 sample per degree).  If the
-           LiDAR driver or Gazebo config ever changes ``angle_increment``,
-           compute the index count from ``scan["angle_increment"]`` instead
-           to keep the cone width accurate.
+    def _publish_precise_command(self, payload: dict) -> None:
+        """Publish a JSON command to /robot/precise_move for robot_manager.py.
 
         Args:
-            direction (float): Positive = check forward cone, negative = check rear cone.
-
-        Returns:
-            bool: True if any valid LiDAR ray in the cone is below
-                  OBSTACLE_DISTANCE_THRESHOLD_M.  Returns False if no scan
-                  data is available (don't block motion on missing data).
+            payload: Command dictionary to JSON-serialise and publish.
         """
-        scan = self._current_scan
-        if scan is None:
-            return False
+        msg = {"data": json.dumps(payload)}
+        self._precise_move_pub.publish(msg)
 
-        ranges = scan.get("ranges", [])
-        num_samples = len(ranges)
-        if num_samples == 0:
-            return False
+    def _ensure_nav2_active(self) -> None:
+        """Ensure Nav2 is running before sending a Nav2 precise-move command.
 
-        half_cone = OBSTACLE_FORWARD_HALF_CONE_DEG
-        # Index 0 = forward (due to π yaw mount), index num_samples//2 = rear
-        center = 0 if direction >= 0 else (num_samples // 2)
+        If ``/robot/navigation_active`` is already True, returns immediately.
+        Otherwise calls ``/robot/start_navigation`` and polls the subscription
+        until navigation_active flips True, with a timeout.
 
-        # Build index list with wrapping
-        if center == 0:
-            # Forward — wraps around the 0/(num_samples-1) boundary
-            indices = list(range(num_samples - half_cone, num_samples)) + list(range(0, half_cone + 1))
-        else:
-            # Rear — contiguous block around center
-            indices = list(range(center - half_cone, center + half_cone + 1))
-
-        # Check valid ranges against threshold
-        for i in indices:
-            if 0 <= i < num_samples:
-                r = ranges[i]
-                # Skip invalid returns: None (null in JSON), 0.0, inf, nan
-                if r is not None and not math.isnan(r):
-                    if VALID_RANGE_MIN < r < float('inf'):
-                        if r < OBSTACLE_DISTANCE_THRESHOLD_M:
-                            return True
-
-        return False
-
-    def _get_position_from_odom(self):
+        Raises:
+            PreciseMotionError: If Nav2 cannot be activated within
+                NAV2_ACTIVATION_TIMEOUT_SECONDS.
         """
-        Extract (x, y) position from current odometry.
+        # Fast path: already running
+        with self._nav_active_lock:
+            if self._nav_active:
+                return
 
-        Returns:
-            tuple[float, float] | None: (x, y) in meters, or None if no data.
-        """
-        if self._current_odom is None:
-            return None
-        pos = self._current_odom["pose"]["pose"]["position"]
-        return (pos["x"], pos["y"])
-
-    def _get_yaw_from_odom(self):
-        """
-        Extract yaw angle from current odometry quaternion.
-
-        Returns:
-            float | None: Yaw in degrees [-180, 180], or None if no data.
-        """
-        if self._current_odom is None:
-            return None
-        ori = self._current_odom["pose"]["pose"]["orientation"]
-        yaw_rad = 2.0 * math.atan2(ori["z"], ori["w"])
-        return math.degrees(yaw_rad)
-
-    @staticmethod
-    def _normalize_angle(angle_deg):
-        """
-        Normalize an angle delta to the range [-180, 180] degrees.
-
-        Args:
-            angle_deg (float): Angle in degrees.
-
-        Returns:
-            float: Normalized angle in degrees.
-        """
-        while angle_deg > 180.0:
-            angle_deg -= 360.0
-        while angle_deg < -180.0:
-            angle_deg += 360.0
-        return angle_deg
-
-    def _wait_for_odom(self, timeout=ODOM_WAIT_TIMEOUT_SECONDS):
-        """
-        Block until the first odometry message is received.
-
-        Args:
-            timeout (float): Maximum seconds to wait.
-
-        Returns:
-            bool: True if odometry data is available, False on timeout.
-        """
-        start = time.time()
-        while self._current_odom is None and (time.time() - start) < timeout:
-            time.sleep(ODOM_POLL_INTERVAL_SECONDS)
-        return self._current_odom is not None
-
-    # ── Nav2 action helper ──────────────────────────────────────────────
-
-    def _send_action_goal(self, server_name, action_type, goal_msg, timeout):
-        """
-        Send a goal to a Nav2 action server and wait for the result.
-
-        Args:
-            server_name (str): Action server topic (e.g. '/drive_on_heading').
-            action_type (str): Action type string (e.g. 'nav2_msgs/action/DriveOnHeading').
-            goal_msg (dict): Goal message dictionary.
-            timeout (float): Maximum seconds to wait for the result.
-
-        Returns:
-            bool: True if the action succeeded, False otherwise.
-        """
-        result_event = threading.Event()
-        result_holder = {"success": False}
-
-        def on_result(result):
-            # Nav2 action result — status 3 == SUCCEEDED (from action_msgs/GoalStatus)
-            status = result.get("status", -1)
-            result_holder["success"] = status == 3
-            result_event.set()
-
+        # Call the service to start Nav2
+        print("🔄 Nav2 not active — calling /robot/start_navigation...")
         try:
-            client = ActionClient(self.ros, server_name, action_type)
-            goal = Goal(client, goal_msg)
-            goal.on("result", on_result)
-            goal.send()
-
-            completed = result_event.wait(timeout=timeout)
-
-            if not completed:
-                print(f"⏰ Action '{server_name}' timed out after {timeout}s")
-                try:
-                    goal.cancel()
-                except Exception:
-                    pass
-                return False
-
-            return result_holder["success"]
-
+            request = ServiceRequest()
+            response = self._start_nav_srv.call(request, timeout=15)
+            # start_navigation may return success=False if already active,
+            # which is fine — we just need navigation_active to go True.
+            print(f"   /robot/start_navigation response: {response.get('message', '')}")
+            
+            # Inject a default initial pose to ensure AMCL unblocks the Nav2 lifecycle.
+            # We do this immediately after starting Nav2 so AMCL is running to receive it.
+            # This is harmless if mapping is active or if AMCL already has a pose.
+            try:
+                if hasattr(self, "set_initial_pose"):
+                    print("   Injecting default initial pose to unblock Nav2 lifecycle...")
+                    self.set_initial_pose(0.0, 0.0, 0.0)
+            except Exception as e:
+                print(f"⚠️ Could not set default initial pose: {e}")
+                
         except Exception as exc:
-            print(f"❌ Action '{server_name}' failed: {exc}")
-            traceback.print_exc()
-            return False
+            raise PreciseMotionError(
+                f"Failed to call /robot/start_navigation: {exc}"
+            )
+
+        # Poll until navigation_active goes True
+        deadline = time.time() + NAV2_ACTIVATION_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            with self._nav_active_lock:
+                if self._nav_active:
+                    print("✅ Nav2 is now active — waiting for behavior servers to settle...")
+                    # navigation_active goes True when the nav2 subprocess starts,
+                    # but individual servers (behavior_server, controller_server)
+                    # need additional time to complete their lifecycle transition.
+                    # Without this settle delay, robot_manager's
+                    # wait_for_server(timeout_sec=5) on DriveOnHeading/Spin can
+                    # timeout and silently drop the command.
+                    time.sleep(self._nav2_settle_seconds)
+                    print("✅ Nav2 behavior servers should be ready.")
+                    return
+            time.sleep(NAV2_ACTIVATION_POLL_SECONDS)
+
+        raise PreciseMotionError(
+            f"Nav2 did not become active within "
+            f"{NAV2_ACTIVATION_TIMEOUT_SECONDS}s after calling "
+            f"/robot/start_navigation. Cannot proceed with Nav2 engine."
+        )
+
+    def _wait_for_precise_move(self, timeout: float = 30.0) -> tuple:
+        """Wait for robot_manager.py to start and then finish precise motion.
+
+        Phase 1: Wait up to PRECISE_MOVE_START_TIMEOUT_SECONDS for the
+        ``/robot/precise_move_active`` topic to go ``True`` (started).
+        Phase 2: Wait up to *timeout* seconds for it to go ``False``
+        (finished).
+
+        This mirrors the exact logic used in robot_agent.py.
+
+        Args:
+            timeout: Maximum seconds to wait for the motion to complete
+                     (Phase 2 only).
+
+        Returns:
+            tuple[bool, bool, float]: (started, finished, active_duration_seconds).
+        """
+        started = False
+        finished = False
+        active_duration = 0.0
+        phase1_end_time = 0.0
+
+        # Phase 1: wait for the manager to start (precise_active → True)
+        start_deadline = time.time() + PRECISE_MOVE_START_TIMEOUT_SECONDS
+        while time.time() < start_deadline:
+            if self._move_cancel.is_set():
+                return started, finished, active_duration
+            with self._precise_active_lock:
+                if self._precise_active:
+                    started = True
+                    phase1_end_time = time.time()
+                    break
+            time.sleep(PRECISE_MOVE_POLL_INTERVAL_SECONDS)
+
+        if not started:
+            print("⚠️ Precise move command timed out before robot_manager started.")
+            return started, finished, active_duration
+
+        # Phase 2: wait for move to complete (precise_active → False)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._move_cancel.is_set():
+                return started, finished, active_duration
+            with self._precise_active_lock:
+                if not self._precise_active:
+                    finished = True
+                    active_duration = time.time() - phase1_end_time
+                    return started, finished, active_duration
+            time.sleep(PRECISE_MOVE_POLL_INTERVAL_SECONDS)
+
+        print(f"⚠️ Precise move command timed out after {timeout:.1f}s while moving.")
+        return started, finished, active_duration
 
     # ── Public drive methods ────────────────────────────────────────────
 
@@ -637,29 +561,16 @@ class QueueMixin:
         engine=None,
         timeout=DRIVE_DISTANCE_TIMEOUT_SECONDS,
     ):
-        """
-        Drive the robot a specific distance using odometry feedback or Nav2.
+        """Drive the robot a specific distance. Blocks until native engine completes.
 
         Args:
-            dist (float): Distance to drive in meters.
-                          Positive = forward, negative = backward.
-            speed (float): Linear speed in m/s (always positive; direction is
-                          determined by the sign of *dist*).
-            engine (PreciseMotionEngine | str | None): Execution engine.
-                ``PreciseMotionEngine.INTERNAL`` — cmd_vel + odom,
-                ``PreciseMotionEngine.NAV2`` — DriveOnHeading action.
-                ``None`` uses the default engine (see ``set_default_engine``).
-                Plain strings ``'internal'`` / ``'nav2'`` are accepted for
-                backward compatibility.
-            timeout (float): Maximum seconds allowed for the manoeuvre.
+            dist (float): Distance in meters (+forward, -backward).
+            speed (float): Linear speed in m/s.
+            engine (str|PreciseMotionEngine): internal (odom) or nav2 (costmap aware).
+            timeout (float): Max allowed seconds.
 
         Returns:
-            bool: True if the target distance was reached.
-
-        Raises:
-            PreciseMotionError: If ``abs(dist)`` exceeds
-                ``MAX_PRECISE_DISTANCE`` (fail-fast, no side effects).
-            NavigationError: On odometry timeout or Nav2 non-success.
+            bool: True if completed (or safely stopped by Nav2).
         """
         # ── Guard: fail-fast distance check (before any setup) ──
         if abs(dist) > MAX_PRECISE_DISTANCE:
@@ -668,233 +579,71 @@ class QueueMixin:
                 f"MAX_PRECISE_DISTANCE ({MAX_PRECISE_DISTANCE}m)"
             )
 
+        # ── Intercept negative distance to protect rear blindspot ──
+        if dist < 0:
+            print(f"🔄 Negative distance ({dist:.3f}m) requested. Rotating 180° to drive forward, then rotating back to preserve lidar coverage.")
+            # 1. Turn 180 degrees
+            if not self.rotate_angle(180.0, engine=engine, timeout=timeout):
+                return False
+            # 2. Drive the absolute distance forward
+            if not self.drive_distance(abs(dist), speed, engine=engine, timeout=timeout):
+                return False
+            # 3. Turn -180 degrees back to original orientation
+            return self.rotate_angle(-180.0, engine=engine, timeout=timeout)
+
         resolved = self._resolve_engine(engine)
-        if resolved == PreciseMotionEngine.NAV2:
-            return self._drive_distance_nav2(dist, speed, timeout)
-        return self._drive_distance_internal(dist, speed, timeout)
+        use_nav2 = resolved == PreciseMotionEngine.NAV2
 
-    def _drive_distance_internal(self, dist, speed, timeout):
-        """Internal engine: closed-loop drive using /cmd_vel + odometry.
-
-        Obstacle-aware: subscribes to /scan LiDAR and pauses velocity when
-        the forward (or rear, if reversing) cone is blocked.  The motion
-        timeout only counts time the robot is actually moving — it freezes
-        while waiting for an obstacle to clear.  A separate obstacle-wait
-        timeout prevents indefinite waits.
-        """
-        if not self._wait_for_odom():
-            print("⚠️ drive_distance: no odometry data — aborting")
-            return False
-
-        abs_dist = abs(dist)
-        direction = 1.0 if dist >= 0 else -1.0
-        cmd_speed = abs(speed) * direction
-
-        start_pos = self._get_position_from_odom()
-        if start_pos is None:
-            return False
+        # ── Pre-flight: ensure Nav2 is up if needed ──
+        if use_nav2:
+            self._ensure_nav2_active()
 
         self._move_cancel.clear()
         self._precise_moving_flag.set()
 
-        motion_elapsed = 0.0
-        obstacle_wait_elapsed = 0.0
-        last_obstacle_log = 0.0
-
         try:
-            while not self._move_cancel.is_set():
-                if motion_elapsed >= timeout:
-                    raise NavigationError(
-                        f"_drive_distance_internal: motion timeout — "
-                        f"elapsed {motion_elapsed:.1f}s >= timeout {timeout:.1f}s"
+            payload = {
+                "mode": "move",
+                "distance": float(dist),
+                "speed": float(abs(speed)),
+                "use_nav2": use_nav2,
+            }
+            print(
+                f"▶️ drive_distance: {dist:.3f}m @ {abs(speed):.2f} m/s "
+                f"(engine={resolved.value})"
+            )
+            self._publish_precise_command(payload)
+
+            # Calculate a sensible timeout: travel time + generous buffer
+            buffer = 20.0
+            effective_timeout = max(timeout, abs(dist) / abs(speed) + buffer)
+
+            started, finished, active_duration = self._wait_for_precise_move(effective_timeout)
+
+            if started and finished:
+                expected_time = abs(dist) / abs(speed)
+                if active_duration < expected_time * 0.5:
+                    print(f"⚠️ drive_distance completed suspiciously fast ({active_duration:.2f}s < {expected_time * 0.5:.2f}s).")
+                    raise PreciseMotionPrematureCompletionError(
+                        f"drive_distance completed in {active_duration:.2f}s, which is suspiciously fast compared "
+                        f"to the expected minimum time of {expected_time:.2f}s. The behavior server may not be ready."
                     )
+                
+                print(f"✅ drive_distance: completed {dist:.3f}m")
+                return True
+            elif not started:
+                print(f"❌ drive_distance: robot_manager did not start the command")
+                return False
+            else:
+                print(f"❌ drive_distance: command did not complete within timeout")
+                return False
 
-                # ── Obstacle check ──
-                if self._is_path_blocked(direction):
-                    self.stop()
-                    time.sleep(ODOM_POLL_INTERVAL_SECONDS)
-                    obstacle_wait_elapsed += ODOM_POLL_INTERVAL_SECONDS
-                    # motion_elapsed does NOT advance while blocked
-
-                    # Rate-limited log
-                    if obstacle_wait_elapsed - last_obstacle_log >= OBSTACLE_LOG_INTERVAL_SECONDS:
-                        print(
-                            f"⏸️ drive_distance: obstacle detected, waiting... "
-                            f"({obstacle_wait_elapsed:.1f}s)"
-                        )
-                        last_obstacle_log = obstacle_wait_elapsed
-
-                    if obstacle_wait_elapsed >= OBSTACLE_MAX_WAIT_SECONDS:
-                        raise NavigationError(
-                            f"drive_distance: obstacle wait timeout — "
-                            f"blocked for {obstacle_wait_elapsed:.1f}s"
-                        )
-                    continue
-
-                # ── Path clear ──
-                if obstacle_wait_elapsed > 0:
-                    print(
-                        f"▶️ drive_distance: path cleared after "
-                        f"{obstacle_wait_elapsed:.1f}s, resuming"
-                    )
-                obstacle_wait_elapsed = 0.0
-                last_obstacle_log = 0.0
-
-                cur_pos = self._get_position_from_odom()
-                if cur_pos is None:
-                    time.sleep(ODOM_POLL_INTERVAL_SECONDS)
-                    continue
-
-                dx = cur_pos[0] - start_pos[0]
-                dy = cur_pos[1] - start_pos[1]
-                traveled = math.sqrt(dx * dx + dy * dy)
-
-                if traveled >= abs_dist - DISTANCE_TOLERANCE_METERS:
-                    self.stop()
-                    print(
-                        f"✅ drive_distance: reached {traveled:.3f}m "
-                        f"(target {abs_dist:.3f}m)"
-                    )
-                    return True
-
-                # Publish velocity command
-                self.move(linear_x=cmd_speed)
-                time.sleep(ODOM_POLL_INTERVAL_SECONDS)
-                motion_elapsed += ODOM_POLL_INTERVAL_SECONDS
-
-        except NavigationError:
-            raise
         except Exception as exc:
-            print(f"❌ drive_distance internal error: {exc}")
+            print(f"❌ drive_distance error: {exc}")
             traceback.print_exc()
+            return False
         finally:
             self._precise_moving_flag.clear()
-            self.stop()
-
-        return False
-
-    def _drive_distance_nav2(self, dist, speed, timeout):
-        """Nav2 engine: DriveOnHeading action client with wait-and-resume.
-
-        .. note:: Obstacle detection heuristic
-           Nav2's DriveOnHeading does not expose a distinct "blocked by
-           obstacle" failure code — any non-success result could be an
-           obstacle, a planner abort, or an action-server error.  We
-           heuristically check ``_is_path_blocked()`` immediately after
-           a failure.  There is a small race window: the obstacle could
-           clear between the action failing and our LiDAR check, causing
-           us to reach the ``else: raise NavigationError`` branch with a
-           slightly inaccurate message.  This is a known Nav2 limitation,
-           not a bug.
-        """
-        if not self._wait_for_odom():
-            print("⚠️ drive_distance (nav2): no odometry data — aborting")
-            return False
-
-        abs_dist = abs(dist)
-        direction = 1.0 if dist >= 0 else -1.0
-
-        start_pos = self._get_position_from_odom()
-        if start_pos is None:
-            return False
-
-        self._move_cancel.clear()
-        self._precise_moving_flag.set()
-
-        motion_elapsed = 0.0
-        obstacle_wait_elapsed = 0.0
-        last_obstacle_log = 0.0
-        remaining_dist = abs_dist
-
-        try:
-            while not self._move_cancel.is_set():
-                if motion_elapsed >= timeout:
-                    raise NavigationError(
-                        f"drive_distance (nav2): motion timeout — "
-                        f"elapsed {motion_elapsed:.1f}s >= timeout {timeout:.1f}s"
-                    )
-
-                # Send goal to Nav2
-                goal_msg = {
-                    "target": {"x": float(remaining_dist * direction), "y": 0.0, "z": 0.0},
-                    "speed": float(abs(speed)),
-                    "time_allowance": {"sec": int(max(1, timeout - motion_elapsed)), "nanosec": 0},
-                }
-
-                start_time = time.time()
-                success = self._send_action_goal(
-                    DRIVE_ON_HEADING_ACTION, DRIVE_ON_HEADING_ACTION_TYPE,
-                    goal_msg, timeout - motion_elapsed,
-                )
-                motion_elapsed += (time.time() - start_time)
-
-                if success:
-                    # Compute actual traveled distance for accurate logging
-                    cur_pos = self._get_position_from_odom()
-                    if cur_pos is not None:
-                        dx = cur_pos[0] - start_pos[0]
-                        dy = cur_pos[1] - start_pos[1]
-                        traveled = math.sqrt(dx * dx + dy * dy)
-                        print(f"✅ drive_distance (nav2): reached {traveled:.3f}m (target {abs_dist:.3f}m)")
-                    else:
-                        print(f"✅ drive_distance (nav2): completed {abs_dist:.3f}m target")
-                    return True
-
-                # Action failed — heuristic: check if path is blocked (see docstring note).
-                if self._is_path_blocked(direction):
-                    while self._is_path_blocked(direction) and not self._move_cancel.is_set():
-                        time.sleep(ODOM_POLL_INTERVAL_SECONDS)
-                        obstacle_wait_elapsed += ODOM_POLL_INTERVAL_SECONDS
-
-                        if obstacle_wait_elapsed - last_obstacle_log >= OBSTACLE_LOG_INTERVAL_SECONDS:
-                            print(f"⏸️ drive_distance (nav2): obstacle detected, waiting... ({obstacle_wait_elapsed:.1f}s)")
-                            last_obstacle_log = obstacle_wait_elapsed
-
-                        if obstacle_wait_elapsed >= OBSTACLE_MAX_WAIT_SECONDS:
-                            raise NavigationError(
-                                f"drive_distance (nav2): obstacle wait timeout — "
-                                f"blocked for {obstacle_wait_elapsed:.1f}s"
-                            )
-
-                    # Loop exited — could be path-cleared OR cancellation.
-                    if self._move_cancel.is_set():
-                        return False
-
-                    if obstacle_wait_elapsed > 0:
-                        print(f"▶️ drive_distance (nav2): path cleared after {obstacle_wait_elapsed:.1f}s, resuming")
-
-                    obstacle_wait_elapsed = 0.0
-                    last_obstacle_log = 0.0
-
-                    # Calculate remaining distance based on odometry
-                    cur_pos = self._get_position_from_odom()
-                    if cur_pos is None:
-                        time.sleep(ODOM_POLL_INTERVAL_SECONDS)
-                        continue
-
-                    dx = cur_pos[0] - start_pos[0]
-                    dy = cur_pos[1] - start_pos[1]
-                    traveled = math.sqrt(dx * dx + dy * dy)
-                    remaining_dist = abs_dist - traveled
-
-                    if remaining_dist <= DISTANCE_TOLERANCE_METERS:
-                        print(f"✅ drive_distance (nav2): reached {traveled:.3f}m (target {abs_dist:.3f}m)")
-                        return True
-                else:
-                    raise NavigationError(
-                        f"drive_distance (nav2): action returned non-success, "
-                        f"but path is clear. Aborting."
-                    )
-
-        except NavigationError:
-            raise
-        except Exception as exc:
-            print(f"❌ drive_distance (nav2) internal error: {exc}")
-            traceback.print_exc()
-        finally:
-            self._precise_moving_flag.clear()
-
-        return False
 
     def rotate_angle(
         self,
@@ -903,121 +652,68 @@ class QueueMixin:
         engine=None,
         timeout=ROTATE_ANGLE_TIMEOUT_SECONDS,
     ):
-        """
-        Rotate the robot by a specific angle using odometry feedback or Nav2.
-
-        .. note:: Obstacle wait/resume parity
-           Only the ``INTERNAL`` engine pauses and resumes on obstacle
-           detection (via ``_is_path_blocked``).  The ``NAV2`` engine
-           (Spin action) hard-fails on obstacle — Nav2 Spin does not
-           expose the feedback needed to implement wait-and-resume.
-           Use ``engine=PreciseMotionEngine.INTERNAL`` if obstacle
-           resilience is required during rotation.
+        """Rotate the robot by a specific angle. Blocks until native engine completes.
 
         Args:
-            angle (float): Rotation angle in degrees.
-                          Positive = counter-clockwise (CCW),
-                          negative = clockwise (CW).
-            speed (float): Rotational speed in deg/s (always positive;
-                          direction is determined by the sign of *angle*).
-            engine (PreciseMotionEngine | str | None): Execution engine.
-                ``None`` uses the default engine (see ``set_default_engine``).
-            timeout (float): Maximum seconds allowed for the manoeuvre.
+            angle (float): Rotation angle in degrees (+CCW, -CW).
+            speed (float): Rotational speed in deg/s.
+            engine (str|PreciseMotionEngine): internal (odom) or nav2 (costmap aware).
+            timeout (float): Max allowed seconds.
 
         Returns:
-            bool: True if the target angle was reached.
-
-        Raises:
-            NavigationError: On odometry timeout or Nav2 non-success.
+            bool: True if completed (or safely stopped by Nav2).
         """
         resolved = self._resolve_engine(engine)
-        if resolved == PreciseMotionEngine.NAV2:
-            return self._rotate_angle_nav2(angle, speed, timeout)
-        return self._rotate_angle_internal(angle, speed, timeout)
+        use_nav2 = resolved == PreciseMotionEngine.NAV2
 
-    def _rotate_angle_internal(self, angle, speed, timeout):
-        """Internal engine: closed-loop rotation using /cmd_vel + odometry yaw."""
-        if not self._wait_for_odom():
-            print("⚠️ rotate_angle: no odometry data — aborting")
-            return False
+        # ── Pre-flight: ensure Nav2 is up if needed ──
+        if use_nav2:
+            self._ensure_nav2_active()
 
-        abs_angle = abs(angle)
-        # Positive angle = CCW = positive angular_z
-        direction = 1.0 if angle >= 0 else -1.0
-        cmd_speed = abs(speed) * direction  # deg/s, move() converts to rad/s
-
-        start_yaw = self._get_yaw_from_odom()
-        if start_yaw is None:
-            return False
-
-        accumulated = 0.0
-        prev_yaw = start_yaw
         self._move_cancel.clear()
-        start_time = time.time()
         self._precise_moving_flag.set()
 
         try:
-            while not self._move_cancel.is_set():
-                elapsed = time.time() - start_time
-                if elapsed >= timeout:
-                    raise NavigationError(
-                        f"_rotate_angle_internal: odometry timeout — "
-                        f"elapsed {elapsed:.1f}s >= timeout {timeout:.1f}s"
-                    )
-
-                cur_yaw = self._get_yaw_from_odom()
-                if cur_yaw is None:
-                    time.sleep(ODOM_POLL_INTERVAL_SECONDS)
-                    continue
-
-                delta = self._normalize_angle(cur_yaw - prev_yaw)
-                accumulated += delta
-                prev_yaw = cur_yaw
-
-                if abs(accumulated) >= abs_angle - ANGLE_TOLERANCE_DEGREES:
-                    self.stop()
-                    print(
-                        f"✅ rotate_angle: rotated {accumulated:.1f}° "
-                        f"(target {angle:.1f}°)"
-                    )
-                    return True
-
-                # Publish angular velocity (deg/s — move() converts to rad/s)
-                self.move(angular_z=cmd_speed)
-                time.sleep(ODOM_POLL_INTERVAL_SECONDS)
-
-        except NavigationError:
-            raise
-        except Exception as exc:
-            print(f"❌ rotate_angle internal error: {exc}")
-            traceback.print_exc()
-        finally:
-            self._precise_moving_flag.clear()
-            self.stop()
-
-        return False
-
-    def _rotate_angle_nav2(self, angle, speed, timeout):
-        """Nav2 engine: Spin action client."""
-        self._precise_moving_flag.set()
-        try:
-            target_yaw_rad = math.radians(angle)
-            goal_msg = {
-                "target_yaw": float(target_yaw_rad),
-                "time_allowance": {"sec": int(timeout), "nanosec": 0},
+            payload = {
+                "mode": "rotate",
+                "angle": float(angle),
+                "speed": float(abs(speed)),
+                "use_nav2": use_nav2,
             }
-            success = self._send_action_goal(
-                SPIN_ACTION, SPIN_ACTION_TYPE, goal_msg, timeout
+            print(
+                f"▶️ rotate_angle: {angle:.1f}° @ {abs(speed):.1f} deg/s "
+                f"(engine={resolved.value})"
             )
-            if success:
-                print(f"✅ rotate_angle (nav2): completed {angle:.1f}°")
+            self._publish_precise_command(payload)
+
+            # Calculate a sensible timeout: rotation time + generous buffer
+            buffer = 20.0
+            effective_timeout = max(timeout, abs(angle) / abs(speed) + buffer)
+
+            started, finished, active_duration = self._wait_for_precise_move(effective_timeout)
+
+            if started and finished:
+                expected_time = abs(angle) / abs(speed)
+                if active_duration < expected_time * 0.5:
+                    print(f"⚠️ rotate_angle completed suspiciously fast ({active_duration:.2f}s < {expected_time * 0.5:.2f}s).")
+                    raise PreciseMotionPrematureCompletionError(
+                        f"rotate_angle completed in {active_duration:.2f}s, which is suspiciously fast compared "
+                        f"to the expected minimum time of {expected_time:.2f}s. The behavior server may not be ready."
+                    )
+                
+                print(f"✅ rotate_angle: completed {angle:.1f}°")
                 return True
-            raise NavigationError(
-                f"rotate_angle (nav2): action returned non-success for "
-                f"{angle:.1f}° — likely obstacle stop. Nav2 engine does not "
-                f"support obstacle wait/resume; use "
-                f"engine=PreciseMotionEngine.INTERNAL for that behaviour."
-            )
+            elif not started:
+                print(f"❌ rotate_angle: robot_manager did not start the command")
+                return False
+            else:
+                print(f"❌ rotate_angle: command did not complete within timeout")
+                return False
+
+        except Exception as exc:
+            print(f"❌ rotate_angle error: {exc}")
+            traceback.print_exc()
+            return False
         finally:
             self._precise_moving_flag.clear()
 
@@ -1030,26 +726,18 @@ class QueueMixin:
         engine=None,
         timeout=DRIVE_DISTANCE_TIMEOUT_SECONDS,
     ):
-        """
-        Drive a distance then rotate by an angle. Stops if either step fails.
+        """Drive a distance then rotate by an angle. Stops if either step fails.
 
         Args:
-            dist (float): Distance in meters (positive = forward,
-                         negative = backward).
-            angle (float): Rotation angle in degrees (positive = CCW,
-                          negative = CW).
-            speed (float): Linear speed in m/s for the drive phase.
-            turn_speed (float): Rotational speed in deg/s for the rotation phase.
-            engine (PreciseMotionEngine | str | None): Execution engine for
-                both sub-steps.  ``None`` uses the default engine.
+            dist (float): Distance in meters (+forward, -backward).
+            angle (float): Rotation angle in degrees (+CCW, -CW).
+            speed (float): Linear speed in m/s.
+            turn_speed (float): Rotational speed in deg/s.
+            engine (str|PreciseMotionEngine): Execution engine.
             timeout (float): Timeout per step in seconds.
 
         Returns:
-            bool: True if both steps succeeded, False if either failed.
-
-        Raises:
-            PreciseMotionError: If ``abs(dist)`` exceeds MAX_PRECISE_DISTANCE.
-            NavigationError: On odometry timeout or Nav2 non-success.
+            bool: True if both steps succeeded.
         """
         if not self.drive_distance(dist, speed, engine=engine, timeout=timeout):
             return False
@@ -1058,12 +746,12 @@ class QueueMixin:
     # ── Teardown ─────────────────────────────────────────────────────
 
     def _queue_shutdown(self):
-        """Clean up queue and precise motion resources during controller shutdown."""
+        """Clean up queue and precise motion bridge resources during controller shutdown."""
         self.clear_queue()
         # Give the worker thread a moment to exit
         if self._queue_thread and self._queue_thread.is_alive():
             self._queue_thread.join(timeout=2.0)
-        
-        safe_unsubscribe(getattr(self, '_odom_sub', None))
-        safe_unsubscribe(getattr(self, '_scan_sub', None))
 
+        safe_unsubscribe(getattr(self, '_precise_active_sub', None))
+        safe_unsubscribe(getattr(self, '_nav_active_sub', None))
+        safe_unadvertise(getattr(self, '_precise_move_pub', None))
