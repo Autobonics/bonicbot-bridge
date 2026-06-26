@@ -228,9 +228,9 @@ class BonicBot:
         """Save current map. Delegates to: system.save_map()"""
         return self.system.save_map()
 
-    def start_navigation(self) -> bool:
+    def start_navigation(self, force: bool = False) -> bool:
         """Start navigation system. Delegates to: system.start_navigation()"""
-        return self.system.start_navigation()
+        return self.system.start_navigation(force=force)
 
     def stop_navigation(self) -> bool:
         """Stop navigation system. Delegates to: system.stop_navigation()"""
