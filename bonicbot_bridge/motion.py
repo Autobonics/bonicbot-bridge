@@ -20,6 +20,7 @@ from .utils import (
     CMD_VEL_TOPIC,
     GOAL_POSE_TOPIC,
     INITIAL_POSE_TOPIC,
+    SET_POSE_TOPIC,
     NAV_STATUS_TOPIC,
     DISTANCE_TO_GOAL_TOPIC,
     CANCEL_NAVIGATION_SERVICE,
@@ -334,6 +335,7 @@ class MotionController(QueueMixin):
             return False
 
         initial_pose_pub = None
+        set_pose_pub = None
         try:
             # Convert degrees to radians for ROS message
             theta_rad = math.radians(theta)
@@ -344,12 +346,16 @@ class MotionController(QueueMixin):
             cov[7] = 0.25  # Y variance
             cov[35] = 0.068  # Yaw variance
 
-            # Create initial pose topic
+            # Create initial pose topics (both /initialpose and /set_pose)
             initial_pose_pub = Topic(
                 self.ros, INITIAL_POSE_TOPIC, POSE_WITH_COVARIANCE_MESSAGE_TYPE
             )
+            set_pose_pub = Topic(
+                self.ros, SET_POSE_TOPIC, POSE_WITH_COVARIANCE_MESSAGE_TYPE
+            )
 
             initial_pose_pub.advertise()
+            set_pose_pub.advertise()
             time.sleep(INITIAL_POSE_TOPIC_READY_DELAY_SECONDS)
 
             # Create pose message
@@ -369,8 +375,9 @@ class MotionController(QueueMixin):
                 },
             }
 
-            # Publish initial pose
+            # Publish initial pose to both topics
             initial_pose_pub.publish(pose_msg)
+            set_pose_pub.publish(pose_msg)
             print(f"📍 Initial pose set: ({x:.2f}, {y:.2f}, θ={theta:.1f}°)")
 
             time.sleep(INITIAL_POSE_PUBLISH_SETTLE_DELAY_SECONDS)
@@ -380,11 +387,12 @@ class MotionController(QueueMixin):
         except Exception as exc:
             raise NavigationError(f"Failed to set initial pose: {str(exc)}")
         finally:
-            if initial_pose_pub is not None:
-                try:
-                    initial_pose_pub.unadvertise()
-                except Exception:
-                    pass
+            for pub in (initial_pose_pub, set_pose_pub):
+                if pub is not None:
+                    try:
+                        pub.unadvertise()
+                    except Exception:
+                        pass
 
     def wait_for_goal(self, timeout=DEFAULT_GOAL_TIMEOUT_SECONDS):
         """

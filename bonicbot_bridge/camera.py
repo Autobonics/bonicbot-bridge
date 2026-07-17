@@ -16,6 +16,7 @@ from .utils import (
     COMPRESSED_IMAGE_MESSAGE_TYPE,
     CAMERA_INFO_TOPIC,
     COMPRESSED_IMAGE_TOPIC,
+    RAW_IMAGE_TOPIC,
     safe_unsubscribe,
 )
 
@@ -56,6 +57,7 @@ class CameraManager:
 
         # Camera topics
         self.image_sub = None
+        self.raw_image_sub = None
         self.info_sub = Topic(
             self.ros,
             CAMERA_INFO_TOPIC,
@@ -197,7 +199,7 @@ class CameraManager:
             # Store user callback
             self.user_callback = callback
 
-            # Subscribe to compressed image topic
+            # Subscribe to compressed and raw image topics
             if not self.image_sub:
                 self.image_sub = Topic(
                     self.ros,
@@ -206,6 +208,15 @@ class CameraManager:
                     throttle_rate=throttle_ms,
                 )
                 self.image_sub.subscribe(self._image_callback)
+
+            if not self.raw_image_sub:
+                self.raw_image_sub = Topic(
+                    self.ros,
+                    RAW_IMAGE_TOPIC,
+                    "sensor_msgs/Image",
+                    throttle_rate=throttle_ms,
+                )
+                self.raw_image_sub.subscribe(self._image_callback)
 
             self.is_streaming_active = True
             self._seed_fallback_frame()
@@ -227,8 +238,12 @@ class CameraManager:
                 return False
 
             if self.image_sub:
-                self.image_sub.unsubscribe()
+                safe_unsubscribe(self.image_sub)
                 self.image_sub = None
+
+            if self.raw_image_sub:
+                safe_unsubscribe(self.raw_image_sub)
+                self.raw_image_sub = None
 
             self.is_streaming_active = False
             self.user_callback = None

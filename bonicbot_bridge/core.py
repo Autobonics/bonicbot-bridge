@@ -204,9 +204,13 @@ class BonicBot:
         """Get distance traveled since start or from a given position. Delegates to: sensors.get_distance_traveled()"""
         return self.sensors.get_distance_traveled(start_pos)
 
-    def wait_for_data(self, timeout=5.0) -> bool:
+    def wait_for_data(
+        self, timeout=5.0, require_lidar=False, require_imu=False
+    ) -> bool:
         """Wait for initial sensor data. Delegates to: sensors.wait_for_data()"""
-        return self.sensors.wait_for_data(timeout)
+        return self.sensors.wait_for_data(
+            timeout, require_lidar=require_lidar, require_imu=require_imu
+        )
 
     def subscribe_to_position(self, callback) -> None:
         """Subscribe to continuous position updates. Delegates to: sensors.subscribe_to_position()"""
@@ -216,6 +220,23 @@ class BonicBot:
         """Get all sensor state. Delegates to: sensors.get_sensor_info()"""
         return self.sensors.get_sensor_info()
 
+#_________________________________________________________________________________________________________________#
+    def get_lidar_scan(self) -> dict:
+        """Get latest raw LiDAR scan. Delegates to: sensors.get_lidar_scan()"""
+        return self.sensors.get_lidar_scan()
+
+    def get_min_obstacle_distance(self) -> float:
+        """Get closest obstacle distance from LiDAR. Delegates to: sensors.get_min_obstacle_distance()"""
+        return self.sensors.get_min_obstacle_distance()
+
+    def get_imu_data(self) -> dict:
+        """Get latest raw IMU message. Delegates to: sensors.get_imu_data()"""
+        return self.sensors.get_imu_data()
+
+    def get_imu_orientation(self) -> dict:
+        """Get IMU orientation quaternion. Delegates to: sensors.get_imu_orientation()"""
+        return self.sensors.get_imu_orientation()
+    #_________________________________________________________________________________________________________________#
     def start_mapping(self) -> bool:
         """Start mapping mode. Delegates to: system.start_mapping()"""
         return self.system.start_mapping()
