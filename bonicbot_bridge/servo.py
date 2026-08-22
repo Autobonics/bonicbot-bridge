@@ -27,8 +27,8 @@ COMMAND_PUBLISH_DELAY_SECONDS = 0.1
 JOINT_STATE_FEEDBACK_DELAY_SECONDS = 0.5
 SERVO_ANGLE_ROUND_DIGITS = 2
 
-OPEN_GRIPPER_ANGLE = 60.0
-CLOSED_GRIPPER_ANGLE = 0.0
+OPEN_GRIPPER_ANGLE = -45.0
+CLOSED_GRIPPER_ANGLE = 60.0
 LEFT_NECK_YAW_ANGLE = 90.0
 RIGHT_NECK_YAW_ANGLE = -90.0
 CENTER_NECK_YAW_ANGLE = 0.0
@@ -315,7 +315,14 @@ class ServoController:
         Returns:
             bool: True if command sent successfully
         """
-        return self.set_grippers(OPEN_GRIPPER_ANGLE, OPEN_GRIPPER_ANGLE)
+        GRIPPER_ANKLE:int=0
+        left_shoulder_angle = self._get_current_angle('left_shoulder')
+        right_shoulder_angle = self._get_current_angle('right_shoulder')
+        if left_shoulder_angle <12 or right_shoulder_angle<12:
+            GRIPPER_ANKLE=-10
+        else:
+            GRIPPER_ANKLE=OPEN_GRIPPER_ANGLE
+        return self.set_grippers(GRIPPER_ANKLE, GRIPPER_ANKLE)
 
     def close_grippers(self):
         """

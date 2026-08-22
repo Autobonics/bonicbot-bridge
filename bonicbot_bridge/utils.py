@@ -14,6 +14,8 @@ TWIST_MESSAGE_TYPE = "geometry_msgs/Twist"
 POSE_STAMPED_MESSAGE_TYPE = "geometry_msgs/PoseStamped"
 POSE_WITH_COVARIANCE_MESSAGE_TYPE = "geometry_msgs/PoseWithCovarianceStamped"
 ODOMETRY_MESSAGE_TYPE = "nav_msgs/Odometry"
+LASER_SCAN_MESSAGE_TYPE = "sensor_msgs/LaserScan"
+IMU_MESSAGE_TYPE = "sensor_msgs/Imu"
 CAMERA_INFO_MESSAGE_TYPE = "sensor_msgs/CameraInfo"
 COMPRESSED_IMAGE_MESSAGE_TYPE = "sensor_msgs/CompressedImage"
 JOINT_STATE_MESSAGE_TYPE = "sensor_msgs/JointState"
@@ -122,6 +124,7 @@ DELETE_LOCATION_TOPIC          = "/robot/delete_location"
 CMD_VEL_TOPIC                  = "/cmd_vel"
 GOAL_POSE_TOPIC                = "/goal_pose"
 INITIAL_POSE_TOPIC             = "/initialpose"
+SET_POSE_TOPIC                 = "/set_pose"
 
 # ── Mapping & costmap topics ─────────────────────────────────────────────
 NAV2_COSTMAP_TOPIC             = "/global_costmap/costmap"
@@ -145,7 +148,18 @@ CANCEL_NAVIGATION_SERVICE      = "/robot/cancel_navigation"
 
 # ── Camera sensor topics ─────────────────────────────────────────────────
 CAMERA_INFO_TOPIC              = "/camera/camera_info"
+RAW_IMAGE_TOPIC                = "/camera/image_raw"
 COMPRESSED_IMAGE_TOPIC         = "/camera/image_raw/compressed"
+
+# ── LiDAR / IMU sensor topics ─────────────────────────────────────────────
+LASER_SCAN_TOPIC               = "/scan"
+IMU_TOPIC                      = "/imu/data"
+
+# Throttle rates (ms) for high-frequency raw sensor subscriptions.
+# Mirrors system.py's /map throttle_rate=70 — unthrottled scan/imu data
+# can flood the rosbridge websocket at their native publish rates.
+LASER_SCAN_THROTTLE_MS         = 200   # ~5 Hz, plenty for SDK polling use
+IMU_THROTTLE_MS                = 100   # ~10 Hz
 
 # ── Servo / joint controller topics ──────────────────────────────────────
 LEFT_ARM_COMMAND_TOPIC         = "/left_arm_controller/commands"
@@ -178,12 +192,18 @@ ROBOT_DISABLE_GESTURE_SERVICE  = "/robot/disable_gesture"
 ROBOT_ENABLE_ARUCO_SERVICE     = "/robot/enable_aruco"
 ROBOT_DISABLE_ARUCO_SERVICE    = "/robot/disable_aruco"
 
-# ── Vision active status topics (Bool) ───────────────────────────────────
+# ── Vision active & enabled status topics (Bool) ───────────────────────────
 VISION_YOLO_ACTIVE_TOPIC       = "/vision/yolo_active"
 VISION_POSE_ACTIVE_TOPIC       = "/vision/pose_active"
 VISION_FACE_ACTIVE_TOPIC       = "/vision/face_active"
 VISION_GESTURE_ACTIVE_TOPIC    = "/vision/gesture_active"
 VISION_ARUCO_ACTIVE_TOPIC      = "/vision/aruco_active"
+
+ROBOT_YOLO_ENABLED_TOPIC       = "/robot/yolo_enabled"
+ROBOT_POSE_ENABLED_TOPIC       = "/robot/pose_enabled"
+ROBOT_FACE_ENABLED_TOPIC       = "/robot/face_enabled"
+ROBOT_GESTURE_ENABLED_TOPIC    = "/robot/gesture_enabled"
+ROBOT_ARUCO_ENABLED_TOPIC      = "/robot/aruco_enabled"
 
 # ── Additional message types ─────────────────────────────────────────────
 MARKER_ARRAY_MESSAGE_TYPE      = "visualization_msgs/MarkerArray"

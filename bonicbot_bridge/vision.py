@@ -56,6 +56,11 @@ from .utils import (
     VISION_FACE_ACTIVE_TOPIC,
     VISION_GESTURE_ACTIVE_TOPIC,
     VISION_ARUCO_ACTIVE_TOPIC,
+    ROBOT_YOLO_ENABLED_TOPIC,
+    ROBOT_POSE_ENABLED_TOPIC,
+    ROBOT_FACE_ENABLED_TOPIC,
+    ROBOT_GESTURE_ENABLED_TOPIC,
+    ROBOT_ARUCO_ENABLED_TOPIC,
     # vision data-output topics
     VISION_YOLO_DETECTIONS_TOPIC,
     VISION_POSE_LANDMARKS_TOPIC,
@@ -159,22 +164,25 @@ class VisionController:
     # =========================================================================
 
     def _setup_status_topics(self):
-        
+        """Subscribe to detector status topics (both /vision/*_active and /robot/*_enabled)."""
         _status_map = [
             (VISION_YOLO_ACTIVE_TOPIC,    self._on_yolo_active),
             (VISION_POSE_ACTIVE_TOPIC,    self._on_pose_active),
             (VISION_FACE_ACTIVE_TOPIC,    self._on_face_active),
             (VISION_GESTURE_ACTIVE_TOPIC, self._on_gesture_active),
             (VISION_ARUCO_ACTIVE_TOPIC,   self._on_aruco_active),
+            (ROBOT_YOLO_ENABLED_TOPIC,    self._on_yolo_active),
+            (ROBOT_POSE_ENABLED_TOPIC,    self._on_pose_active),
+            (ROBOT_FACE_ENABLED_TOPIC,    self._on_face_active),
+            (ROBOT_GESTURE_ENABLED_TOPIC, self._on_gesture_active),
+            (ROBOT_ARUCO_ENABLED_TOPIC,   self._on_aruco_active),
         ]
+        self._status_subs = []
         for topic_name, callback in _status_map:
             try:
                 sub = Topic(self._ros, topic_name, BOOL_MESSAGE_TYPE)
                 sub.subscribe(callback)
-                # Store handle for cleanup
-                attr = f"_{topic_name.split('/')[-1].replace('_active', '')}_active_sub"
-                # e.g.  /vision/yolo_active  →  _yolo_active_sub
-                setattr(self, attr, sub)
+                self._status_subs.append(sub)
             except Exception as exc:
                 print(f"⚠️ VisionController: could not subscribe to {topic_name}: {exc}")
 
@@ -661,16 +669,12 @@ class VisionController:
 
 
     def shutdown(self):
-       
         self.unsubscribe_from_vision_pipeline()
 
         # Unsubscribe status topics
-        for attr in (
-            "_yolo_active_sub", "_pose_active_sub", "_face_active_sub",
-            "_gesture_active_sub", "_aruco_active_sub",
-        ):
-            safe_unsubscribe(getattr(self, attr, None))
-            setattr(self, attr, None)
+        for sub in getattr(self, "_status_subs", []):
+            safe_unsubscribe(sub)
+        self._status_subs = []
 
         safe_unadvertise(self._vision_ctrl_pub)
         self._vision_ctrl_pub = None
